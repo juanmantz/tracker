@@ -27,7 +27,7 @@ jobs:
           python3 - <<'PY'
           import json
           from pathlib import Path
-          catalog={'revision':1,'nodes':[{'id':'fixture-'+str(i),'kind':'project','name':'Fixture project '+str(i),'fields':{}} for i in range(11)],'edges':[]}
+          catalog={'revision':1,'nodes':[{'id':'fixture-'+str(i),'kind':'project','name':'Fixture project '+str(i),'fields':{}} for i in range(11)],'edges':[],'preferences':{'desktop_context_enabled':True}}
           Path('artifacts/native-release/fixture-projects.json').write_text(json.dumps(catalog))
           PY
           python3 scripts/personalize-installer.py artifacts/native-release/Dreams-Time-Installer.pkg artifacts/native-release/fixture-projects.json artifacts/native-release/Personalized-test.pkg
@@ -56,6 +56,7 @@ jobs:
           request=urllib.request.Request('http://127.0.0.1:43123/api/snapshot',headers={'Authorization':'Bearer '+token})
           with urllib.request.urlopen(request) as response: snapshot=json.load(response)
           assert len(snapshot['projects'])==11 and not snapshot['dreams']['connected']
+          assert snapshot['desktop_context_enabled']
           Path('artifacts/native-release/bootstrap-check.json').write_text(json.dumps({'projects':len(snapshot['projects']),'tracking_samples':snapshot['recording']['sample_count'],'sign_in_required_for_tracking':False}))
           print('Installed native app, bundled runtime, HTTP service and native collector verified on macOS.')
           PY

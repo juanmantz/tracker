@@ -44,6 +44,9 @@ class App:
                 if self.tracker.setting('bootstrap_stamp') != stamp:
                     self.tracker.import_projects(bootstrap)
                     self.tracker.set_setting('bootstrap_stamp', stamp)
+                preferences = bootstrap.get('preferences', {})
+                if isinstance(preferences, dict) and preferences.get('desktop_context_enabled') is True and self.tracker.setting('desktop_context_enabled') is None:
+                    self.tracker.set_setting('desktop_context_enabled', True)
             except (ValueError, TypeError, KeyError, OSError, AttributeError):
                 pass  # A broken seed must never prevent tracking or overwrite history.
         token_path = directory / "pairing-token"
