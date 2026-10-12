@@ -80,10 +80,10 @@ class App:
         script = ROOT / "native" / "ActivitySensor.js"
         # The scripting sensor ships with the Mac app and needs no native compilation.
         # Keep the compiled sensor available for development/optional builds.
-        if script.exists():
-            command = ["/usr/bin/osascript", "-l", "JavaScript", str(script)]
-        elif binary.exists():
+        if binary.exists():
             command = [str(binary)]
+        elif script.exists():
+            command = ["/usr/bin/osascript", "-l", "JavaScript", str(script)]
         else:
             self.sensor_error = "The app is incomplete. Download Dreams Time again."
             return

@@ -28,7 +28,7 @@ jobs:
           /usr/bin/codesign --verify --deep --strict '/Applications/Dreams Time.app'
           '/Applications/Dreams Time.app/Contents/MacOS/DreamsTime' --smoke-test > artifacts/native-release/app-smoke.log 2>&1
           curl -f 'http://127.0.0.1:43123/health' > artifacts/native-release/health.json
-          /usr/bin/osascript -l JavaScript native/ActivitySensor.js --once > artifacts/native-release/native-sample.json
+          '/Applications/Dreams Time.app/Contents/Resources/project/native/activity-sensor' --once > artifacts/native-release/native-sample.json
           python3 - <<'PY'
           import json
           h=json.load(open('artifacts/native-release/health.json'))

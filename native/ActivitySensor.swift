@@ -54,11 +54,13 @@ func emit() {
     let app = NSWorkspace.shared.frontmostApplication
     let trusted = AXIsProcessTrusted()
     var title = ""
+    var document = ""
     var contextText = ""
     let bundle = app?.bundleIdentifier ?? ""
     // Browser titles are supplied by the extension, which can exclude private tabs.
     let browsers: Set<String> = ["com.google.Chrome", "com.google.Chrome.beta", "com.microsoft.edgemac", "com.brave.Browser", "company.thebrowser.Browser", "com.apple.Safari", "org.mozilla.firefox"]
-    if trusted, let pid = app?.processIdentifier, !browsers.contains(bundle) {
+    let excluded: Set<String> = ["com.agilebits.onepassword7", "com.1password.1password", "com.apple.loginwindow"]
+    if trusted, let pid = app?.processIdentifier, !browsers.contains(bundle), !excluded.contains(bundle) {
         let element = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(element, 0.4)
         var window: CFTypeRef?
@@ -69,6 +71,10 @@ func emit() {
             if AXUIElementCopyAttributeValue(axWindow, kAXTitleAttribute as CFString, &value) == .success {
                 title = value as? String ?? ""
             }
+            var documentValue: CFTypeRef?
+            if AXUIElementCopyAttributeValue(axWindow, kAXDocumentAttribute as CFString, &documentValue) == .success {
+                document = documentValue as? String ?? (documentValue as? URL)?.absoluteString ?? ""
+            }
             if contextEnabled && ["com.openai.chat", "com.openai.chatgpt", "com.openai.codex"].contains(bundle) && Date().timeIntervalSince1970 - lastContextAt > 10 {
                 contextText = visibleText(axWindow)
                 lastContextAt = Date().timeIntervalSince1970
@@ -76,9 +82,10 @@ func emit() {
         }
     }
     let session = CGSessionCopyCurrentDictionary() as? [String: Any]
-    let locked = !sessionActive || !awake || (session?["CGSSessionScreenIsLocked"] as? Bool ?? false) || bundle == "com.apple.loginwindow"
+    let locked = session == nil || !sessionActive || !awake || (session?["CGSSessionScreenIsLocked"] as? Bool ?? false) || (session?["kCGSSessionOnConsoleKey"] as? Bool == false) || bundle == "com.apple.loginwindow"
     let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: UInt32.max)!)
-    let event: [String: Any] = ["ts": Date().timeIntervalSince1970, "mono": ProcessInfo.processInfo.systemUptime, "app": bundle, "app_name": app?.localizedName ?? "Unknown", "title": title, "idle": idle.isFinite ? idle : 0, "locked": locked, "accessibility": trusted, "desktop_context": contextText]
+    guard idle.isFinite && idle >= 0 else { fputs("macOS returned an invalid idle duration.\n", stderr); exit(1) }
+    let event: [String: Any] = ["ts": Date().timeIntervalSince1970, "mono": ProcessInfo.processInfo.systemUptime, "app": bundle, "app_name": app?.localizedName ?? "Unknown", "title": title, "document": document, "idle": idle, "locked": locked, "accessibility": trusted, "desktop_context": contextText]
     if let data = try? JSONSerialization.data(withJSONObject: event) {
         FileHandle.standardOutput.write(data)
         FileHandle.standardOutput.write(Data([10]))

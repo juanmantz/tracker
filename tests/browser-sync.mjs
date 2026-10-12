@@ -30,7 +30,7 @@ try{
   await page.locator('#sync').click();await page.getByText('Dreams already has these totals.',{exact:true}).waitFor();
   checks.push('Direct Sync writes assigned Worked totals and repeat sync reports unchanged totals');
   await fs.mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/project-sync.png',fullPage:true});
-  await page.getByRole('button',{name:'Settings',exact:true}).click();await page.locator('#weekly-sync').check();
+  await page.getByRole('button',{name:'Settings',exact:true}).click();assert.equal(await page.locator('#weekly-sync').isChecked(),true);await page.locator('#weekly-sync').uncheck();await page.locator('#weekly-sync').check();
   await page.getByText('Completed weeks will sync while Dreams Time is open.',{exact:true}).waitFor();
   await page.locator('#refresh-projects').click();await page.getByText('2 Dreams projects loaded.',{exact:false}).waitFor();
   await page.getByRole('button',{name:'Projects',exact:true}).click();

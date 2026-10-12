@@ -33,8 +33,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Run the bundled no-compiler Mac sensor
-        run: /usr/bin/osascript -l JavaScript native/ActivitySensor.js --once > jxa-sample.json
       - run: ./scripts/build-mac.sh
       - name: Read a real native sample without prompting for permission
         run: |

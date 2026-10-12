@@ -7,9 +7,13 @@ BUILD_SDK="$(/usr/bin/xcrun --show-sdk-path)"
 for BUILD_ARCH in arm64 x86_64; do
   /usr/bin/xcrun swiftc -swift-version 5 -O -sdk "$BUILD_SDK" -target "$BUILD_ARCH-apple-macos12.0" \
     "$BUILD_ROOT/native/DreamsTimeApp.swift" -o "$BUILD_OUTPUT/DreamsTime-$BUILD_ARCH"
+  /usr/bin/xcrun swiftc -swift-version 5 -O -sdk "$BUILD_SDK" -target "$BUILD_ARCH-apple-macos12.0" \
+    "$BUILD_ROOT/native/ActivitySensor.swift" -o "$BUILD_OUTPUT/sensor-$BUILD_ARCH"
 done
 /usr/bin/lipo -create "$BUILD_OUTPUT/DreamsTime-arm64" "$BUILD_OUTPUT/DreamsTime-x86_64" -output "$BUILD_OUTPUT/DreamsTime"
-python3 "$BUILD_ROOT/scripts/package-mac.py" --native-binary "$BUILD_OUTPUT/DreamsTime"
+/usr/bin/lipo -create "$BUILD_OUTPUT/sensor-arm64" "$BUILD_OUTPUT/sensor-x86_64" -output "$BUILD_OUTPUT/activity-sensor"
+/usr/bin/codesign --force --sign - --identifier local.dreamstime.sensor "$BUILD_OUTPUT/activity-sensor"
+python3 "$BUILD_ROOT/scripts/package-mac.py" --native-binary "$BUILD_OUTPUT/DreamsTime" --native-sensor "$BUILD_OUTPUT/activity-sensor"
 /usr/bin/ditto "$BUILD_ROOT/artifacts/mac-build/Dreams Time.app" "$BUILD_OUTPUT/stage/Applications/Dreams Time.app"
 /usr/bin/codesign --force --deep --sign - --identifier local.dreamstime.companion "$BUILD_OUTPUT/stage/Applications/Dreams Time.app"
 /usr/bin/codesign --verify --deep --strict "$BUILD_OUTPUT/stage/Applications/Dreams Time.app"

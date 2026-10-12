@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser()
 parser.add_argument('--update-only', action='store_true')
 parser.add_argument('--native-binary', type=Path)
+parser.add_argument('--native-sensor', type=Path)
 args = parser.parse_args()
 BUILD = ROOT / 'artifacts' / ('mac-update' if args.update_only else 'mac-build')
 APP = BUILD / 'Dreams Time.app'
@@ -25,6 +26,9 @@ for arch, source in ([] if args.update_only else RUNTIMES.items()):
     shutil.copyfile(source, RESOURCES / 'runtime' / (arch + '.tar.gz'))
 for directory in ('dreamstime', 'native', 'web', 'extension'):
     shutil.copytree(ROOT / directory, RESOURCES / 'project' / directory, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', 'activity-sensor'))
+sensor_binary = RESOURCES / 'project' / 'native' / 'activity-sensor'
+if args.native_sensor:
+    shutil.copyfile(args.native_sensor, sensor_binary)
 executable = APP / 'Contents' / 'MacOS' / 'DreamsTime'
 executable.parent.mkdir()
 shutil.copyfile(args.native_binary or ROOT / 'scripts' / 'launch-mac.sh', executable)
@@ -40,7 +44,8 @@ info = {'CFBundleName':'Dreams Time', 'CFBundleDisplayName':'Dreams Time', 'CFBu
 (APP / 'Contents' / 'PkgInfo').write_bytes(b'APPL????')
 # All distributable app resources readable; entry point executable after Finder extraction.
 for p in APP.rglob('*'):
-    if p.is_file() and p != executable: p.chmod(0o644)
+    if p.is_file() and p not in (executable, sensor_binary): p.chmod(0o644)
+    elif p == sensor_binary: p.chmod(0o755)
     elif p.is_dir(): p.chmod(0o755)
 APP.chmod(0o755)
 readme = BUILD / 'OPEN FIRST.txt'
