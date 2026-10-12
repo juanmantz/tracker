@@ -1,0 +1,51 @@
+name: Tracker checks
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  tracking:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+      - run: npm ci
+      - run: python3 -m unittest discover -s tests -v
+      - run: npm run test:extension
+      - run: npm run test:sensor
+      - run: npx playwright install --with-deps chromium
+      - run: |
+          CHROMIUM_PATH="$(node --input-type=module -e 'import {chromium} from "@playwright/test"; console.log(chromium.executablePath())')" npm run test:ui
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: tracker-ui-evidence
+          path: artifacts/
+  native-mac:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run the bundled no-compiler Mac sensor
+        run: /usr/bin/osascript -l JavaScript native/ActivitySensor.js --once > jxa-sample.json
+      - run: ./scripts/build-mac.sh
+      - name: Read a real native sample without prompting for permission
+        run: |
+          native/activity-sensor --once > sample.json
+          python3 - <<'PY'
+          import json
+          s = json.load(open('sample.json'))
+          assert isinstance(s['ts'], (float, int))
+          assert isinstance(s['app'], str)
+          assert isinstance(s['accessibility'], bool)
+          assert s['idle'] >= 0
+          print('Native sensor emitted the expected event contract.')
+          PY
+      - run: python3 -m unittest discover -s tests -v

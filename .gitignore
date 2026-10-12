@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.data/
+node_modules/
+artifacts/*
+!artifacts/.gitkeep
+.DS_Store
+*.zip
+native/activity-sensor

@@ -1,0 +1,34 @@
+#!/bin/bash
+set -euo pipefail
+INSTALL_USER="$(/usr/bin/stat -f %Su /dev/console)"
+if [[ "$INSTALL_USER" == root || "$INSTALL_USER" == loginwindow || -z "$INSTALL_USER" ]]; then exit 0; fi
+INSTALL_UID="$(/usr/bin/id -u "$INSTALL_USER")"
+INSTALL_GROUP="$(/usr/bin/id -gn "$INSTALL_USER")"
+INSTALL_HOME="$(/usr/bin/dscl . -read "/Users/$INSTALL_USER" NFSHomeDirectory | /usr/bin/sed 's/^NFSHomeDirectory: //')"
+INSTALL_DATA="$INSTALL_HOME/Library/Application Support/Dreams Time"
+INSTALL_AGENTS="$INSTALL_HOME/Library/LaunchAgents"
+/usr/bin/install -d -m 700 -o "$INSTALL_USER" -g "$INSTALL_GROUP" "$INSTALL_DATA"
+/usr/bin/install -m 600 -o "$INSTALL_USER" -g "$INSTALL_GROUP" "$(dirname "$0")/bootstrap-projects.json" "$INSTALL_DATA/bootstrap-projects.json"
+/usr/bin/install -d -m 755 -o "$INSTALL_USER" -g "$INSTALL_GROUP" "$INSTALL_AGENTS"
+INSTALL_AGENT="$INSTALL_AGENTS/local.dreamstime.start.plist"
+cat > "$INSTALL_AGENT" <<'PLIST'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>Label</key><string>local.dreamstime.start</string>
+<key>ProgramArguments</key><array><string>/Applications/Dreams Time.app/Contents/MacOS/DreamsTime</string><string>--background</string></array>
+<key>RunAtLoad</key><true/>
+<key>ProcessType</key><string>Background</string>
+</dict></plist>
+PLIST
+/usr/sbin/chown "$INSTALL_USER:$INSTALL_GROUP" "$INSTALL_AGENT"
+/bin/chmod 644 "$INSTALL_AGENT"
+# Remove only the superseded copy of this same app, leaving all data untouched.
+INSTALL_OLD="$INSTALL_HOME/Applications/Dreams Time.app"
+if [[ -d "$INSTALL_OLD" ]]; then
+  INSTALL_IDENTIFIER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INSTALL_OLD/Contents/Info.plist" 2>/dev/null || true)"
+  if [[ "$INSTALL_IDENTIFIER" == local.dreamstime.companion ]]; then /bin/rm -rf "$INSTALL_OLD"; fi
+fi
+# Install the login item for the next login; start the current session in its app window.
+/bin/launchctl asuser "$INSTALL_UID" /usr/bin/sudo -u "$INSTALL_USER" /usr/bin/open '/Applications/Dreams Time.app' || true
+exit 0

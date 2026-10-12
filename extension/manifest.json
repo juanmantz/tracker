@@ -1,0 +1,13 @@
+{
+  "manifest_version": 3,
+  "name": "Dreams Time Companion",
+  "version": "0.1.0",
+  "description": "Give your local Dreams tracker the active file or conversation. No cloud upload.",
+  "permissions": ["tabs", "storage", "alarms"],
+  "host_permissions": ["http://127.0.0.1:43123/*"],
+  "background": {"service_worker": "background.js", "type": "module"},
+  "options_page": "options.html",
+  "action": {"default_title": "Dreams Time settings"},
+  "incognito": "not_allowed",
+  "content_scripts": [{"matches": ["http://*/*", "https://*/*"], "js": ["context.js"], "run_at": "document_idle"}]
+}

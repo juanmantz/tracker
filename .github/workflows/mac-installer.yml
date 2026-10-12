@@ -1,0 +1,66 @@
+name: Build and install Mac app
+on:
+  push:
+    branches: [main, mac-installer]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  installer:
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Fetch verified bundled Python runtimes
+        run: |
+          curl -fL --retry 2 'https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.12.15%2B20261009-aarch64-apple-darwin-install_only_stripped.tar.gz' -o /tmp/dreamstime-arm64.tar.gz
+          curl -fL --retry 2 'https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.12.15%2B20261009-x86_64-apple-darwin-install_only_stripped.tar.gz' -o /tmp/dreamstime-intel.tar.gz
+          echo '233f8e15255b3e1d1fd47ea5dd5230dfed803f371138e896e54d98c60ae19f6f  /tmp/dreamstime-arm64.tar.gz' | shasum -a 256 -c -
+          echo 'fb3187d95334813b88940db0f1ca57b84cedfd552739c3a5771c3ea0e49988c9  /tmp/dreamstime-intel.tar.gz' | shasum -a 256 -c -
+      - name: Build native universal app and installer
+        run: bash scripts/build-installer-mac.sh
+      - name: Install using macOS Installer and open the real native window
+        run: |
+          sudo /usr/sbin/installer -pkg artifacts/native-release/Dreams-Time-Installer.pkg -target /
+          /usr/bin/codesign --verify --deep --strict '/Applications/Dreams Time.app'
+          '/Applications/Dreams Time.app/Contents/MacOS/DreamsTime' --smoke-test > artifacts/native-release/app-smoke.log 2>&1
+          curl -f 'http://127.0.0.1:43123/health' > artifacts/native-release/health.json
+          /usr/bin/osascript -l JavaScript native/ActivitySensor.js --once > artifacts/native-release/native-sample.json
+          python3 - <<'PY'
+          import json
+          h=json.load(open('artifacts/native-release/health.json'))
+          assert h['app']=='dreams-time' and h['version']=='0.6.0'
+          s=json.load(open('artifacts/native-release/native-sample.json'))
+          assert isinstance(s['app'],str) and s['idle']>=0 and isinstance(s['accessibility'],bool)
+          print('Installed native app, bundled runtime, HTTP service and native collector verified on macOS.')
+          PY
+      - name: Split download into manageable artifacts
+        run: |
+          split -b 24000000 artifacts/native-release/Dreams-Time-Installer.pkg artifacts/native-release/installer-part-
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-aa
+          path: artifacts/native-release/installer-part-aa
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-ab
+          path: artifacts/native-release/installer-part-ab
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer-ac
+          path: artifacts/native-release/installer-part-ac
+          if-no-files-found: ignore
+          compression-level: 0
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: mac-install-proof
+          path: |
+            artifacts/native-release/app-smoke.log
+            artifacts/native-release/health.json
+            artifacts/native-release/native-sample.json

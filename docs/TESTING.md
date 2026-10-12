@@ -1,0 +1,31 @@
+# Testing without waiting for real hours
+
+## Fast complete workflow
+
+Run `npm test` after `npm ci`. Set `CHROMIUM_PATH` if Chromium is not at `/usr/bin/chromium`.
+
+- Python tests use the actual tracking engine, SQLite, launcher and HTTP handler. They cover app switches, pause/lock, idle removal, sleeping gaps, DST week boundaries, corrections and private-browser exclusion.
+- Recognition tests cover linked files surviving renames, native document paths, ambiguous names, narrower names, weak conversation suggestions and saved corrections. Generic activity assignments remain scoped to that record.
+- OAuth/MCP tests start an isolated real HTTP provider and drive the production connection client. They verify registration, PKCE, callback state and issuer, token refresh rotation, private credential storage, actual `record_measurement` Worked commands, zero corrections, revision conflicts and pending request recovery after restart.
+- Browser tests drive the actual local application through sign-in, project load, suggestion confirmation, generic activity assignment, direct sync, repeat sync, weekly settings and disconnect. The isolated provider replaces the remote Dreams account; the app's APIs, client and database are real.
+- JXA and extension contract tests execute their production code with controlled Mac/Chrome API fixtures. These do not establish installed permissions on a physical Mac.
+
+`npm run test:sync-ui` runs the connection/project/sync journey on its own. Screenshots and machine-readable reports are saved in `artifacts/`. Production has no synthetic native event injection endpoint.
+
+## Accounting replay
+
+The Settings workday test feeds eight fictional hours through the actual engine in a separate in-memory database. It checks exact project partitions, not whether a displayed timer increases. The eight-hour input includes app switches, idle, lock, coding, unknown activity and pause. This can verify accounting immediately without polluting personal history.
+
+## What still needs a Mac
+
+Finder launch, Gatekeeper behavior, native Accessibility and document availability require a Mac. The user has observed their installed timer increasing, but that alone does not establish correct document recognition or remote synchronization.
+
+For the installed 0.5 app, sign in through **Projects → Connect Dreams**, confirm one actual activity's destination, and **Sync assigned hours**. The local status reports the sent seconds and week. In Dreams, the destination's Worked measurement should show source `Dreams Time` and that period. Repeat sync should keep the same total. This validates the real account connection without collecting hours first.
+
+No artificial activity or fictional Worked measurements are sent to the user's live Dreams map by these tests. The deployed worker's OAuth and measurement contracts were inspected read-only; its consent/login path has not been observed on the user's Mac.
+
+## Installer coverage
+
+The launcher tests mock Mac `open`/`ditto` and use a Linux runtime fixture. They check cold install, paths containing spaces, readiness, checksum validation, repeat-launch reuse, corruption/stale-lock recovery, version replacement and preservation of data and pairing tokens.
+
+The universal package includes checksum-verified standalone CPython 3.12.15 archives. The native sensor runs using macOS's built-in JXA, with an optional compiled Swift collector for developers. The package is currently unsigned and not notarized.

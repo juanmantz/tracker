@@ -1,0 +1,90 @@
+// macOS-only foreground sensor. Never captures keystrokes or screenshots.
+import AppKit
+import ApplicationServices
+import Foundation
+
+let prompt = CommandLine.arguments.contains("--request-permission")
+if prompt {
+    let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+    _ = AXIsProcessTrustedWithOptions(options)
+}
+var sessionActive = true
+var awake = true
+let center = NSWorkspace.shared.notificationCenter
+let observers = [
+    center.addObserver(forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main) { _ in sessionActive = false },
+    center.addObserver(forName: NSWorkspace.sessionDidBecomeActiveNotification, object: nil, queue: .main) { _ in sessionActive = true },
+    center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { _ in awake = false },
+    center.addObserver(forName: NSWorkspace.didWakeNotification, object: nil, queue: .main) { _ in awake = true }
+]
+
+let contextEnabled = CommandLine.arguments.contains("--chatgpt-context")
+var lastContextAt = 0.0
+func visibleText(_ root: AXUIElement) -> String {
+    var queue: [(AXUIElement, Int)] = [(root, 0)]
+    var output: [String] = []
+    let deadline = Date().timeIntervalSince1970 + 0.3
+    var visited = 0
+    while !queue.isEmpty && visited < 160 && Date().timeIntervalSince1970 < deadline {
+        let (node, depth) = queue.removeFirst()
+        visited += 1
+        AXUIElementSetMessagingTimeout(node, 0.08)
+        var roleValue: CFTypeRef?
+        _ = AXUIElementCopyAttributeValue(node, kAXRoleAttribute as CFString, &roleValue)
+        let role = roleValue as? String ?? ""
+        // Do not traverse editable controls: drafts never become context.
+        if ["AXTextField", "AXTextArea", "AXSecureTextField", "AXComboBox"].contains(role) { continue }
+        if role == "AXStaticText" {
+            var value: CFTypeRef?
+            _ = AXUIElementCopyAttributeValue(node, kAXValueAttribute as CFString, &value)
+            if let text = value as? String, !text.isEmpty { output.append(String(text.prefix(1000))) }
+        }
+        if depth < 8 {
+            var children: CFTypeRef?
+            _ = AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &children)
+            if let elements = children as? [AXUIElement] {
+                queue.append(contentsOf: elements.prefix(40).map { ($0, depth + 1) })
+            }
+        }
+    }
+    return String(output.joined(separator: "\n").prefix(8000))
+}
+
+func emit() {
+    let app = NSWorkspace.shared.frontmostApplication
+    let trusted = AXIsProcessTrusted()
+    var title = ""
+    var contextText = ""
+    let bundle = app?.bundleIdentifier ?? ""
+    // Browser titles are supplied by the extension, which can exclude private tabs.
+    let browsers: Set<String> = ["com.google.Chrome", "com.google.Chrome.beta", "com.microsoft.edgemac", "com.brave.Browser", "company.thebrowser.Browser", "com.apple.Safari", "org.mozilla.firefox"]
+    if trusted, let pid = app?.processIdentifier, !browsers.contains(bundle) {
+        let element = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(element, 0.4)
+        var window: CFTypeRef?
+        if AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &window) == .success,
+           let window = window, CFGetTypeID(window) == AXUIElementGetTypeID() {
+            var value: CFTypeRef?
+            let axWindow = unsafeBitCast(window, to: AXUIElement.self)
+            if AXUIElementCopyAttributeValue(axWindow, kAXTitleAttribute as CFString, &value) == .success {
+                title = value as? String ?? ""
+            }
+            if contextEnabled && ["com.openai.chat", "com.openai.chatgpt", "com.openai.codex"].contains(bundle) && Date().timeIntervalSince1970 - lastContextAt > 10 {
+                contextText = visibleText(axWindow)
+                lastContextAt = Date().timeIntervalSince1970
+            }
+        }
+    }
+    let session = CGSessionCopyCurrentDictionary() as? [String: Any]
+    let locked = !sessionActive || !awake || (session?["CGSSessionScreenIsLocked"] as? Bool ?? false) || bundle == "com.apple.loginwindow"
+    let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: UInt32.max)!)
+    let event: [String: Any] = ["ts": Date().timeIntervalSince1970, "mono": ProcessInfo.processInfo.systemUptime, "app": bundle, "app_name": app?.localizedName ?? "Unknown", "title": title, "idle": idle.isFinite ? idle : 0, "locked": locked, "accessibility": trusted, "desktop_context": contextText]
+    if let data = try? JSONSerialization.data(withJSONObject: event) {
+        FileHandle.standardOutput.write(data)
+        FileHandle.standardOutput.write(Data([10]))
+    }
+}
+emit()
+if CommandLine.arguments.contains("--once") { exit(0) }
+let timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { _ in emit() }
+RunLoop.main.run()

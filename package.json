@@ -1,0 +1,16 @@
+{
+  "name": "dreams-time-companion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:ui": "node tests/browser.mjs",
+    "test:sync-ui": "node tests/browser-sync.mjs",
+    "test:extension": "node --test tests/extension.test.mjs",
+    "test": "python3 -m unittest discover -s tests -v && npm run test:sensor && npm run test:extension && npm run test:ui && npm run test:sync-ui",
+    "test:sensor": "node --test tests/sensor.test.mjs"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.56.1"
+  }
+}
