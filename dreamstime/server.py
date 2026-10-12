@@ -44,7 +44,7 @@ class App:
                 if self.tracker.setting('bootstrap_stamp') != stamp:
                     self.tracker.import_projects(bootstrap)
                     self.tracker.set_setting('bootstrap_stamp', stamp)
-            except (ValueError, TypeError, KeyError):
+            except (ValueError, TypeError, KeyError, OSError, AttributeError):
                 pass  # A broken seed must never prevent tracking or overwrite history.
         token_path = directory / "pairing-token"
         if not token_path.exists():
@@ -78,8 +78,8 @@ class App:
             return
         binary = ROOT / "native" / "activity-sensor"
         script = ROOT / "native" / "ActivitySensor.js"
-        # The scripting sensor ships with the Mac app and needs no native compilation.
-        # Keep the compiled sensor available for development/optional builds.
+        # Installer builds ship a compiled universal collector. The scripting path
+        # remains available for developer/source runs without a built collector.
         if binary.exists():
             command = [str(binary)]
         elif script.exists():

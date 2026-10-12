@@ -40,3 +40,14 @@ state preserves already recorded time. Project bookkeeping lives on a separate t
 | State-specific plain descriptions | User cannot understand terminology | Explain consequences without process jargon |
 | Tracking / Projects / Settings tabs | User dislikes dense dashboard | Keep the main view about collecting time |
 | Details-only samples, error traces, export and simulated tests | User feedback; craft functional clarity | Debug material available on demand |
+
+## 0.6: installation and account authorization
+
+The user's explicit requirement is a downloadable installable Mac app with very little setup. The existing utility interface remains the locked build target. Live Refero onboarding research is unavailable (NO_SUBSCRIPTION); bundled craft guidance and the user's observed friction guide the interaction repair.
+
+- Use the standard macOS Installer journey and one complete PKG rather than asking the user to choose full vs update archives.
+- Open a native app window with a Dock icon; keep service addresses and browser setup out of the primary flow.
+- Preload only work asset IDs/names/links in the owner's private installer, so local project recognition can start without sign-in. Never put that catalog into the public source repo.
+- Label the optional account action Enable saving in Dreams and explain the consequence: authorize sending assigned hours to the existing Dreams account. It is not needed to record activity.
+- Enable completed-week syncing after the account grants authorization. The user can disable it in Settings.
+- Delegate OS permission and package installation controls to macOS. These remain standard system interactions.

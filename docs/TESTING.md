@@ -8,7 +8,7 @@ Run `npm test` after `npm ci`. Set `CHROMIUM_PATH` if Chromium is not at `/usr/b
 - Recognition tests cover linked files surviving renames, native document paths, ambiguous names, narrower names, weak conversation suggestions and saved corrections. Generic activity assignments remain scoped to that record.
 - OAuth/MCP tests start an isolated real HTTP provider and drive the production connection client. They verify registration, PKCE, callback state and issuer, token refresh rotation, private credential storage, actual `record_measurement` Worked commands, zero corrections, revision conflicts and pending request recovery after restart.
 - Browser tests drive the actual local application through sign-in, project load, suggestion confirmation, generic activity assignment, direct sync, repeat sync, weekly settings and disconnect. The isolated provider replaces the remote Dreams account; the app's APIs, client and database are real.
-- JXA and extension contract tests execute their production code with controlled Mac/Chrome API fixtures. These do not establish installed permissions on a physical Mac.
+- Extension contract tests execute production code with controlled Chrome fixtures. The installed 0.6 collector is compiled Swift and is exercised on a macOS runner; the earlier JXA path remains a development fallback.
 
 `npm run test:sync-ui` runs the connection/project/sync journey on its own. Screenshots and machine-readable reports are saved in `artifacts/`. Production has no synthetic native event injection endpoint.
 
@@ -29,3 +29,11 @@ No artificial activity or fictional Worked measurements are sent to the user's l
 The launcher tests mock Mac `open`/`ditto` and use a Linux runtime fixture. They check cold install, paths containing spaces, readiness, checksum validation, repeat-launch reuse, corruption/stale-lock recovery, version replacement and preservation of data and pairing tokens.
 
 The universal package includes checksum-verified standalone CPython 3.12.15 archives. The native sensor runs using macOS's built-in JXA, with an optional compiled Swift collector for developers. The package is currently unsigned and not notarized.
+
+## Native installer (0.6)
+
+The Mac workflow compiles universal arm64/x86_64 native window and collector executables, bundles both checksum-verified CPython archives, and uses Apple's pkgbuild/productbuild. It modifies the unsigned PKG with an 11-project fictional catalog using the same personalization code as the owner's private installer, installs it through macOS Installer, verifies the app code signature, renders the UI in WKWebView, and observes at least two actual samples from the installed collector. The snapshot must contain the 11 preloaded projects with no Dreams login.
+
+The first real Mac run exposed a Ref-bridging failure in the earlier JXA collector. Shipping the compiled Swift collector removed that scripting dependency. The complete installed native app now runs with its own window and Dock icon. Raw personal bootstrap catalogs are excluded from Git and CI; the app payload and BOM remain unchanged during personalization.
+
+This establishes actual macOS installation/startup/window/capture behavior. User-specific Gatekeeper, Accessibility approval and live account consent remain separate OS/account actions. The package is not notarized.

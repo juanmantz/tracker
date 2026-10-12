@@ -1,6 +1,6 @@
 # Dreams Time development
 
-The shipping app runs a Python standard-library loopback service, a macOS JXA activity sensor and a local dashboard. It uses an optional Chromium extension for focused browser context. Node/Playwright are development dependencies only.
+The shipping app runs a Python standard-library loopback service, a compiled macOS activity sensor and a local dashboard. It uses an optional Chromium extension for focused browser context. Node/Playwright are development dependencies only.
 
 ```bash
 python3 -m dreamstime.server --no-sensor
@@ -41,3 +41,11 @@ The app has no continuous ChatGPT account/phone activity API and does not measur
 `scripts/package-mac.py` builds a universal archive using the two verified standalone Python archives in `/tmp`. `--update-only` omits those runtimes and reuses the installed one. The launcher compares app versions, shuts down an older local server with its existing token, installs the new code, and starts it with the same data directory. Neither archive contains local activity or credentials.
 
 See `docs/TESTING.md` for test layers and unverified physical-Mac behavior.
+
+## Native shipping build
+
+`native/DreamsTimeApp.swift` owns the native window, standard app/Edit menus, account-authorization navigation, clipboard/save dialogs and app quit. The launch script runs in headless installed mode; its private HTTP service is embedded in WKWebView. Both architectures of `ActivitySensor.swift` are compiled and shipped, with native AXDocument support. The scripted collector is a fallback for developer builds only.
+
+`scripts/build-installer-mac.sh` builds the universal app, ad-hoc signs it, and invokes pkgbuild/productbuild. Installer postinstall preserves the activity directory, writes the minimal project catalog privately, installs a per-user login agent and opens the app. `scripts/personalize-installer.py` replaces only the existing catalog in the Scripts cpio archive of an unsigned Apple-built XAR. It preserves all other archive bytes, including the app payload and BOM, and validates the reconstructed checksums.
+
+The owner's real catalog belongs in `.data/installer-projects.json` (Git-ignored) and the private delivered PKG. Public CI uses a fictional catalog to test this exact packaging and bootstrap path. Never add the owner's map or credentials to source or public build artifacts.

@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
+@unittest.skipIf(sys.platform == 'darwin', 'Linux runtime/launch-tool fixtures; the real bundled app is installed and tested in the mac-installer workflow.')
 class InstallerTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix='Dreams install test ')
