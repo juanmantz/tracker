@@ -24,7 +24,14 @@ jobs:
         run: bash scripts/build-installer-mac.sh
       - name: Install using macOS Installer and open the real native window
         run: |
-          sudo /usr/sbin/installer -pkg artifacts/native-release/Dreams-Time-Installer.pkg -target /
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          catalog={'revision':1,'nodes':[{'id':'fixture-'+str(i),'kind':'project','name':'Fixture project '+str(i),'fields':{}} for i in range(11)],'edges':[]}
+          Path('artifacts/native-release/fixture-projects.json').write_text(json.dumps(catalog))
+          PY
+          python3 scripts/personalize-installer.py artifacts/native-release/Dreams-Time-Installer.pkg artifacts/native-release/fixture-projects.json artifacts/native-release/Personalized-test.pkg
+          sudo /usr/sbin/installer -pkg artifacts/native-release/Personalized-test.pkg -target /
           /usr/bin/codesign --verify --deep --strict '/Applications/Dreams Time.app'
           '/Applications/Dreams Time.app/Contents/MacOS/DreamsTime' --smoke-test > artifacts/native-release/app-smoke.log 2>&1
           curl -f 'http://127.0.0.1:43123/health' > artifacts/native-release/health.json
@@ -46,6 +53,10 @@ jobs:
           assert diagnostics['recording']['sample_count']>=2, diagnostics
           assert diagnostics['recording']['process_running'], diagnostics
           Path('artifacts/native-release/diagnostics.json').write_text(json.dumps(diagnostics))
+          request=urllib.request.Request('http://127.0.0.1:43123/api/snapshot',headers={'Authorization':'Bearer '+token})
+          with urllib.request.urlopen(request) as response: snapshot=json.load(response)
+          assert len(snapshot['projects'])==11 and not snapshot['dreams']['connected']
+          Path('artifacts/native-release/bootstrap-check.json').write_text(json.dumps({'projects':len(snapshot['projects']),'tracking_samples':snapshot['recording']['sample_count'],'sign_in_required_for_tracking':False}))
           print('Installed native app, bundled runtime, HTTP service and native collector verified on macOS.')
           PY
       - name: Split download into manageable artifacts
@@ -76,3 +87,4 @@ jobs:
             artifacts/native-release/health.json
             artifacts/native-release/native-sample.json
             artifacts/native-release/diagnostics.json
+            artifacts/native-release/bootstrap-check.json
