@@ -99,6 +99,8 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
     }
 
     @objc func quitApp() {
+        let stopURL = home.appendingPathComponent("Library/Application Support/Dreams Time/.stopped")
+        FileManager.default.createFile(atPath: stopURL.path, contents: Data())
         let tokenURL = home.appendingPathComponent("Library/Application Support/Dreams Time/pairing-token")
         guard let token = try? String(contentsOf: tokenURL, encoding: .utf8).trimmingCharacters(in: .whitespacesAndNewlines) else {
             NSApp.terminate(nil); return
@@ -166,6 +168,7 @@ func makeLauncher() -> Process {
     environment["DREAMSTIME_APP_BUNDLE"] = Bundle.main.bundleURL.path
     environment["DREAMSTIME_HEADLESS"] = "1"
     environment["DREAMSTIME_INSTALLED"] = "1"
+    environment["DREAMSTIME_BACKGROUND"] = CommandLine.arguments.contains("--background") ? "1" : "0"
     process.environment = environment
     return process
 }

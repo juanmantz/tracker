@@ -23,7 +23,7 @@ with open(sys.argv[1], 'wb') as f:
     plistlib.dump([{'BundleIsRelocatable':False,'BundleHasStrictIdentifier':True,'BundleIsVersionChecked':True,'RootRelativeBundlePath':'Applications/Dreams Time.app','BundleOverwriteAction':'upgrade'}], f)
 PY
 chmod +x "$BUILD_ROOT/scripts/pkg/scripts/postinstall"
-/usr/bin/pkgbuild --root "$BUILD_OUTPUT/stage" --identifier local.dreamstime.pkg --version 0.6.1 --install-location / \
+/usr/bin/pkgbuild --root "$BUILD_OUTPUT/stage" --identifier local.dreamstime.pkg --version 0.7.0 --install-location / \
   --component-plist "$BUILD_OUTPUT/components.plist" --scripts "$BUILD_ROOT/scripts/pkg/scripts" \
   "$BUILD_OUTPUT/components/DreamsTime.pkg"
 /usr/bin/productbuild --distribution "$BUILD_ROOT/scripts/pkg/Distribution.xml" --resources "$BUILD_ROOT/scripts/pkg/resources" \

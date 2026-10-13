@@ -10,11 +10,12 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
-from .recognition import recognize, WORK_KINDS
+from .recognition import recognize, WORK_KINDS, normalize, GENERIC
 
 BROWSERS = {"com.google.Chrome", "com.google.Chrome.beta", "com.microsoft.edgemac", "com.brave.Browser", "company.thebrowser.Browser", "com.apple.Safari", "org.mozilla.firefox"}
 BROWSER_FAMILIES = {"com.google.Chrome": "chrome", "com.google.Chrome.beta": "chrome", "com.microsoft.edgemac": "edge", "com.brave.Browser": "brave", "company.thebrowser.Browser": "arc"}
 EXCLUDED_APPS = {"com.agilebits.onepassword7", "com.1password.1password", "com.apple.loginwindow"}
+FOCUS_APPS = {"com.openai.chat", "com.openai.chatgpt", "com.openai.codex", "com.figma.Desktop", "com.microsoft.VSCode", "com.todesktop.230313mzl4w4u92", "com.apple.iWork.Pages", "com.apple.iWork.Keynote", "com.apple.iWork.Numbers", "com.adobe.Photoshop", "com.adobe.illustrator", "com.adobe.InDesign", "com.bohemiancoding.sketch3"}
 
 
 def clean_url(value):
@@ -61,6 +62,25 @@ def identity(url):
 
 def digest(value):
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def context_key(context):
+    # An opaque association key. No URL, path or conversation text leaves the Mac.
+    if context.get('identity'):
+        return digest(['identity', context['identity']])
+    return digest([context.get(k, '') for k in ('app', 'identity', 'title')] +
+                  [sorted(h['project'] for h in context.get('project_hints', []) if isinstance(h, dict) and isinstance(h.get('project'), str))])
+
+
+def rememberable(context):
+    if context.get('excluded'):
+        return False
+    if context.get('identity'):
+        return True
+    if context.get('app') in ('com.openai.chat', 'com.openai.chatgpt', 'com.openai.codex'):
+        return False  # Repeated generic desktop chat titles are not conversation IDs.
+    meaningful = set(normalize(context.get('title', '')).split()) - GENERIC - {'untitled', 'draft', 'new', 'window'}
+    return bool(meaningful)
 
 
 def week_bounds(week, tz="Europe/Madrid"):
@@ -148,15 +168,16 @@ class Tracker:
                 if not isinstance(links, str):
                     links = ""
                 urls = re.findall(r'https?://[^\s<>"\)]+', links)
-                catalog.append({"id":n["id"],"name":n["name"],"kind":n["kind"],"identities":sorted(set(identity(u.rstrip('.,;')) for u in urls if identity(u.rstrip('.,;'))))})
+                catalog.append({"id":n["id"],"name":n["name"],"kind":n["kind"],"aliases": n['name'].split(' / ') if ' / ' in n['name'] else [],"identities":sorted(set(identity(u.rstrip('.,;')) for u in urls if identity(u.rstrip('.,;'))))})
         count = 0
         for n in candidates:
             if n.get("kind") in WORK_KINDS and not n.get("archived"):
                 self.add_project(n["name"], n["id"], n["id"])
                 count += 1
         with self.lock:
-            self.set_setting("recognition_catalog", catalog)
-            self.reclassify()
+            if self.setting("recognition_catalog") != catalog:
+                self.set_setting("recognition_catalog", catalog)
+                self.reclassify()
             self.db.commit()
         return count
 
@@ -188,7 +209,7 @@ class Tracker:
                 raise ValueError('This activity no longer exists. Refresh the page.')
             self.db.execute("UPDATE segments SET project=?,reason='Manually assigned activity' WHERE id=?", (project, segment_id))
 
-    def recommendation(self, context):
+    def recommendation(self, context, at=None):
         explicit = None
         for kind, value, app in (("identity", context.get("identity", ""), ""), ("title", context.get("title", ""), context.get("app", ""))):
             if value:
@@ -201,22 +222,54 @@ class Tracker:
             row = self.db.execute("SELECT prompts FROM conversations WHERE identity=?", (context["identity"],)).fetchone()
             if row:
                 snippets = json.loads(row[0])
-        return recognize(context, self.setting("recognition_catalog", []), explicit, snippets)
+        catalog = self.setting("recognition_catalog", [])
+        valid = {p['id'] for p in catalog}
+        result = recognize(context, catalog, explicit, snippets)
+        if context.get('excluded') or explicit:
+            return result
+        if rememberable(context):
+            learned = self.setting('auto_associations', {}).get(context_key(context))
+            if learned in valid:
+                return {'project': learned, 'confidence': 'reviewed', 'reason': 'Project learned from daily review', 'candidates': []}
+        if at is not None:
+            key = context_key(context)
+            for decision in reversed(self.setting('auto_decisions', [])):
+                if decision['context'] == key and decision['start'] <= at < decision['end'] and decision['project'] in valid:
+                    return {'project': decision['project'], 'confidence': 'reviewed', 'reason': 'Daily project review', 'candidates': []}
+        if result['project'] or result['confidence'] == 'ambiguous':
+            return result
+        # Only text extracted from a recognized conversation pane can assign by
+        # a unique project mention. Whole-window/sidebar text remains a suggestion.
+        if context.get('context_scope') == 'conversation' and len(result['candidates']) == 1:
+            return {'project': result['candidates'][0]['project'], 'confidence': 'high', 'reason': 'Project in the current conversation', 'candidates': result['candidates']}
+        if at is not None and context.get('app') in FOCUS_APPS:
+            focus = next((f for f in reversed(self.setting('focus_history', [])) if f['at'] <= at), None)
+            if focus and focus['project'] in valid:
+                return {'project': focus['project'], 'confidence': 'confirmed', 'reason': 'Current project set in ChatGPT', 'candidates': result['candidates']}
+        return result
 
-    def classify(self, context):
-        result = self.recommendation(context)
+    def classify(self, context, at=None):
+        result = self.recommendation(context, at)
         return result["project"], result["reason"] if result["project"] else ("Excluded activity" if context.get("excluded") else "Needs a project association")
 
     def reclassify(self):
-        for row in self.db.execute("SELECT id,context,reason FROM segments").fetchall():
+        boundaries = sorted({f['at'] for f in self.setting('focus_history', [])} |
+                            {d[k] for d in self.setting('auto_decisions', []) for k in ('start', 'end')})
+        for row in self.db.execute("SELECT * FROM segments").fetchall():
             if row["reason"] in ("Explicit current session", "Manually assigned activity"):
                 continue
-            p, reason = self.classify(json.loads(row["context"]))
-            self.db.execute("UPDATE segments SET project=?,reason=? WHERE id=?", (p, reason, row["id"]))
+            context = json.loads(row['context'])
+            cuts = [row['start'], *(b for b in boundaries if row['start'] < b < row['end']), row['end']]
+            for index, (start, end) in enumerate(zip(cuts, cuts[1:])):
+                p, reason = self.classify(context, start)
+                if index == 0:
+                    self.db.execute("UPDATE segments SET end=?,project=?,reason=? WHERE id=?", (end, p, reason, row['id']))
+                else:
+                    self.db.execute("INSERT INTO segments(start,end,context,project,reason) VALUES(?,?,?,?,?)", (start,end,row['context'],p,reason))
         if self.current and self.current["reason"] != "Explicit current session":
-            self.current["project"], self.current["reason"] = self.classify(self.current["context"])
+            self.current["project"], self.current["reason"] = self.classify(self.current["context"], self.current['ts'])
         if self.previous and self.previous["reason"] != "Explicit current session":
-            self.previous["project"], self.previous["reason"] = self.classify(self.previous["context"])
+            self.previous["project"], self.previous["reason"] = self.classify(self.previous["context"], self.previous['ts'])
 
     def pause(self, value):
         if not isinstance(value, bool):
@@ -274,7 +327,9 @@ class Tracker:
             cached = self.desktop_context
             if not evidence and cached and 0 <= sample['ts'] - cached['at'] <= 12 and all(cached.get(key, '') == context.get(key, '') for key in ('app','title','identity')):
                 evidence = cached['text']
+                context['context_scope'] = cached.get('scope', 'window')
             if evidence and not self.paused:
+                context.setdefault('context_scope', sample.get('context_scope', 'window'))
                 hints = recognize(context, self.setting("recognition_catalog", []), snippets=[str(evidence)])
                 if hints["candidates"]:
                     context["project_hints"] = [{"project":c["project"]} for c in hints["candidates"]]
@@ -308,14 +363,14 @@ class Tracker:
         if self.run_start is None:
             self.run_start = ts
         context = self.context_for(sample) if not self.paused else {"app": "", "app_name": "Paused", "title": "", "url": "", "identity": "", "source": "paused", "excluded": True}
-        project, reason = self.classify(context)
+        project, reason = self.classify(context, ts)
         if self.session:
             if ts >= self.session["expires"] or idle >= self.idle_after or sample.get("locked"):
                 self.session = None
             elif self.session["app"] == context["app"] and self.session["title"] == context["title"]:
                 project, reason = self.session["project"], "Explicit current session"
         if sample.get("desktop_context") and not self.paused:
-            self.desktop_context = {"app": context["app"], "title": context["title"], "identity": context['identity'], "at": ts, "text": str(sample["desktop_context"])[:8000], "source": "Visible accessibility text; may include sidebar content"}
+            self.desktop_context = {"app": context["app"], "title": context["title"], "identity": context['identity'], "at": ts, "text": str(sample["desktop_context"])[:8000], "scope": sample.get('context_scope', 'window'), "source": "Visible accessibility text"}
         active = not (self.paused or sample.get("locked") or idle >= self.idle_after or context["excluded"])
         current = {"ts": ts, "mono": mono, "idle": idle, "active": active, "context": context, "project": project, "reason": reason}
         prev = self.previous
@@ -336,6 +391,7 @@ class Tracker:
         self.previous = current
         self.current = current
         self.health.update(sensor="connected", accessibility=sample.get("accessibility", False), last_sample=ts)
+        self.health['input'] = {k: round(sample[k], 1) for k in ('mouse_idle', 'keyboard_idle') if isinstance(sample.get(k), (int, float)) and math.isfinite(sample[k]) and sample[k] >= 0}
         return True
 
     def add_segment(self, start, end, context, project, reason):
@@ -352,7 +408,7 @@ class Tracker:
             d = dict(r)
             d.update(start=max(r["start"], start), end=min(r["end"], end), context=json.loads(r["context"]))
             d["seconds"] = round(d["end"] - d["start"], 3)
-            d["recognition"] = self.recommendation(d["context"])
+            d["recognition"] = self.recommendation(d["context"], d['start'])
             result.append(d)
         return result
 
@@ -386,7 +442,7 @@ class Tracker:
             health = dict(self.health)
             if health["last_sample"] is not None and now - health["last_sample"] > self.max_gap:
                 health["sensor"] = "stale"
-            return {"health": health, "paused": self.paused, "current": self.current, "report": self.report(week or monday(now, self.timezone)), "rules": self.rules(), "projects": self.projects(), "conversations": [{**dict(r), "prompts": json.loads(r["prompts"])} for r in self.db.execute("SELECT * FROM conversations ORDER BY captured DESC LIMIT 20")], "idle_after": self.idle_after, "session": self.session, "desktop_context": self.desktop_context, "recommendation": self.recommendation(self.current["context"]) if self.current else None}
+            return {"health": health, "paused": self.paused, "current": self.current, "report": self.report(week or monday(now, self.timezone)), "rules": self.rules(), "projects": self.projects(), "conversations": [{**dict(r), "prompts": json.loads(r["prompts"])} for r in self.db.execute("SELECT * FROM conversations ORDER BY captured DESC LIMIT 20")], "idle_after": self.idle_after, "session": self.session, "desktop_context": self.desktop_context, "recommendation": self.recommendation(self.current["context"], self.current["ts"]) if self.current else None}
 
     def close(self):
         self.db.close()

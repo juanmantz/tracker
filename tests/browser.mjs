@@ -43,10 +43,11 @@ try{
   await page.getByRole('button',{name:'Settings',exact:true}).click();await page.locator('#software-test').evaluate(e=>e.open=true);await page.getByRole('button',{name:'Run simulated workday',exact:true}).click();
   await page.getByRole('heading',{name:'Time calculations passed.',exact:true}).waitFor();checks.push('Simulated test clearly says it cannot verify Mac capture');
   await page.getByRole('button',{name:'Tracking',exact:true}).click();assert.equal(await page.locator('#today-timer').innerText(),'00:01:00');checks.push('Simulation leaves real-time display unchanged');
+  await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByText('Troubleshooting',{exact:true}).click();
   await page.getByRole('button',{name:'Check it works',exact:true}).click();await page.getByRole('heading',{name:'Switch apps, then come back.',exact:true}).waitFor();checks.push('Live check uses plain app-switch instructions');
   await page.setViewportSize({width:390,height:844});assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:'artifacts/simple-mobile.png',fullPage:true});checks.push('Narrow screen retains one clear state and no horizontal scrolling');
-  await page.getByRole('button',{name:'Settings',exact:true}).click();await page.getByText('Troubleshooting',{exact:true}).click();
+  await page.getByRole('button',{name:'Settings',exact:true}).click();await page.locator('#diagnostics').evaluate(e=>e.closest('details').open=true);
   const [download]=await Promise.all([page.waitForEvent('download'),page.locator('#diagnostics').click()]);assert.equal(download.suggestedFilename(),'dreams-time-diagnostics.json');checks.push('Technical details and diagnostics are available on demand');
   assert.deepEqual(runtimeErrors,[]);checks.push('No browser runtime errors');
   const result={passed:true,checks};console.log(JSON.stringify(result,null,2));await fs.writeFile('artifacts/browser-results.json',JSON.stringify(result,null,2));

@@ -18,6 +18,8 @@ cat > "$INSTALL_AGENT" <<'PLIST'
 <key>Label</key><string>local.dreamstime.start</string>
 <key>ProgramArguments</key><array><string>/Applications/Dreams Time.app/Contents/MacOS/DreamsTime</string><string>--background</string></array>
 <key>RunAtLoad</key><true/>
+<key>StartInterval</key><integer>60</integer>
+<key>AbandonProcessGroup</key><true/>
 <key>ProcessType</key><string>Background</string>
 </dict></plist>
 PLIST
@@ -29,6 +31,8 @@ if [[ -d "$INSTALL_OLD" ]]; then
   INSTALL_IDENTIFIER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INSTALL_OLD/Contents/Info.plist" 2>/dev/null || true)"
   if [[ "$INSTALL_IDENTIFIER" == local.dreamstime.companion ]]; then /bin/rm -rf "$INSTALL_OLD"; fi
 fi
-# Install the login item for the next login; start the current session in its app window.
+# Activate recovery now, without requiring the user to log out.
+/bin/launchctl bootout "gui/$INSTALL_UID/local.dreamstime.start" 2>/dev/null || true
+/bin/launchctl bootstrap "gui/$INSTALL_UID" "$INSTALL_AGENT" || true
 /bin/launchctl asuser "$INSTALL_UID" /usr/bin/sudo -u "$INSTALL_USER" /usr/bin/open '/Applications/Dreams Time.app' || true
 exit 0

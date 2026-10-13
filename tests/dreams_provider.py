@@ -114,7 +114,7 @@ class Provider:
                     if name == 'get_map':
                         output = copy.deepcopy(provider.map)
                     else:
-                        assert name == 'apply_changes'
+                        assert name in ('apply_changes', 'create_node', 'update_node')
                         if args['requestId'] in provider.requests:
                             output = provider.requests[args['requestId']]
                         elif provider.force_conflict or args['baseRevision'] != provider.map['revision']:
@@ -122,7 +122,18 @@ class Provider:
                             result = {'isError': True, 'content': [{'type': 'text', 'text': 'The map changed elsewhere. Your draft is kept; review it and save again.'}]}
                             return self.send(200, {'jsonrpc': '2.0', 'id': data['id'], 'result': result})
                         else:
-                            for command in args['commands']:
+                            if name == 'create_node':
+                                assert args['kind'] == 'note' and isinstance(args['fields']['notes'], str)
+                                assert len(args['fields']['notes']) <= 20000
+                                provider.map['nodes'].append({'id': 'note-' + args['requestId'], 'kind': 'note', 'name': args['name'], 'fields': copy.deepcopy(args['fields']), 'measurements': []})
+                            elif name == 'update_node':
+                                node = next(n for n in provider.map['nodes'] if n['id'] == args['id'])
+                                assert node['kind'] == 'note'
+                                assert len(args['patch'].get('fields', {}).get('notes', '')) <= 20000
+                                node['fields'].update(copy.deepcopy(args['patch'].get('fields', {})))
+                                if 'archived' in args['patch']:
+                                    node['archived'] = args['patch']['archived']
+                            for command in args.get('commands', []):
                                 assert command['type'] == 'record_measurement'
                                 node = next(n for n in provider.map['nodes'] if n['id'] == command['id'])
                                 measurement = command['measurement']

@@ -41,7 +41,7 @@ jobs:
           python3 - <<'PY'
           import json
           h=json.load(open('artifacts/native-release/health.json'))
-          assert h['app']=='dreams-time' and h['version']=='0.6.1'
+          assert h['app']=='dreams-time' and h['version']=='0.7.0'
           s=json.load(open('artifacts/native-release/native-sample.json'))
           assert isinstance(s['app'],str) and s['idle']>=0 and isinstance(s['accessibility'],bool)
           import time, urllib.request
@@ -64,6 +64,8 @@ jobs:
           PY
       - name: Verify preserved hours and live sign-in setup from the installed app
         run: python3 tests/mac_upgrade_check.py verify
+      - name: Verify unattended recovery of the installed app
+        run: python3 tests/mac_autonomy_check.py
       - name: Split download into manageable artifacts
         run: |
           split -b 24000000 artifacts/native-release/Dreams-Time-Installer.pkg artifacts/native-release/installer-part-
@@ -95,3 +97,4 @@ jobs:
             artifacts/native-release/bootstrap-check.json
             artifacts/native-release/upgrade-check.json
             artifacts/native-release/live-setup-check.json
+            artifacts/native-release/autonomy-check.json

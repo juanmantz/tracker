@@ -70,6 +70,30 @@ class App:
         self.connection = DreamsConnection(directory, port)
         self.sync = DreamsSync(self.tracker, self.connection, self.installation)
         self.oauth_native = False
+        self.watchdog_stop = threading.Event()
+        self.watchdog_thread = None
+        self.last_recovery = 0
+
+    def watchdog_tick(self, now=None):
+        now = time.time() if now is None else now
+        if (platform.system() != 'Darwin' or self.tracker.paused or self.sensor_stopped_intentionally
+                or not self.tracker.setting('capture_enabled', False) or self.watchdog_stop.is_set()):
+            return
+        last = self.tracker.health.get('last_sample') or self.sensor_started_at or 0
+        alive = self.sensor and self.sensor.poll() is None
+        if (not alive or now - max(last, self.sensor_started_at or 0) > 20) and now - self.last_recovery >= 60:
+            self.last_recovery = now
+            self.stop_sensor()
+            self.tracker.previous = None
+            self.start_sensor()
+            self.tracker.set_setting('sensor_recoveries', self.tracker.setting('sensor_recoveries', 0) + 1)
+
+    def start_watchdog(self):
+        def run():
+            while not self.watchdog_stop.wait(10):
+                self.watchdog_tick()
+        self.watchdog_thread = threading.Thread(target=run, daemon=True)
+        self.watchdog_thread.start()
 
     def start_sensor(self):
         if self.tracker.paused:
@@ -214,6 +238,7 @@ def handler_for(app):
                     app.sync.refresh()
                     app.tracker.set_setting('sync_error', None)
                     app.tracker.set_setting('weekly_sync', True)
+                    app.tracker.set_setting('automatic_sync', True)
                     self.send_response(303)
                     self.send_header('Location', '/signed-in' if app.oauth_native else '/#projects')
                     self.send_header('Cache-Control', 'no-store')
@@ -226,7 +251,7 @@ def handler_for(app):
                     # Never render the authorization code/token from the URL.
                     return self.send(400, 'Dreams connection needs attention. Return to Dreams Time, open Settings, and connect again.', 'text/plain; charset=utf-8')
             if path == '/signed-in':
-                return self.send(200, '<!doctype html><html><head><title>Dreams Time is connected</title><link rel="stylesheet" href="/style.css"></head><body><main class="app"><section class="panel"><h1>Hours can now be saved in Dreams.</h1><p>Return to the Dreams Time app. Assigned hours from completed weeks will sync automatically while tracking runs.</p></section></main></body></html>', 'text/html; charset=utf-8')
+                return self.send(200, '<!doctype html><html><head><title>Dreams Time is connected</title><link rel="stylesheet" href="/style.css"></head><body><main class="app"><section class="panel"><h1>Hours can now be saved in Dreams.</h1><p>Project hours will save automatically in the background. You can close this page.</p></section></main></body></html>', 'text/html; charset=utf-8')
             if path in ("/", "/app.js", "/style.css"):
                 name = "index.html" if path == "/" else path[1:]
                 content = (ROOT / "web" / name).read_text()
@@ -319,13 +344,15 @@ def handler_for(app):
                     return self.send(200, app.sync.send(data['week']))
                 elif path == '/api/dreams/disconnect':
                     app.tracker.set_setting('weekly_sync', False)
+                    app.tracker.set_setting('automatic_sync', False)
                     app.connection.disconnect()
-                elif path == '/api/dreams/weekly':
+                elif path in ('/api/dreams/weekly', '/api/dreams/automatic'):
                     if not isinstance(data.get('enabled'), bool):
                         raise ValueError('Expected enabled true or false.')
                     if data['enabled'] and not app.connection.status()['connected']:
                         raise ValueError('Connect Dreams first.')
                     app.tracker.set_setting('weekly_sync', data['enabled'])
+                    app.tracker.set_setting('automatic_sync', data['enabled'])
                 elif path == "/api/chatgpt/import":
                     return self.send(200, {"conversations": import_chatgpt(app.tracker, data["conversations"]), "hours_added": 0})
                 elif path == "/api/quickcheck":
@@ -336,6 +363,8 @@ def handler_for(app):
                     app.quickcheck.start()
                     return self.send(200, app.quickcheck.snapshot())
                 elif path == "/api/quit":
+                    if data.get('restart') is not True:
+                        (app.directory / '.stopped').touch(mode=0o600)
                     self.send(200, {"ok": True})
                     threading.Thread(target=self.server.shutdown, daemon=True).start()
                     return
@@ -380,6 +409,7 @@ def main():
     if not args.no_sensor:
         app.tracker.set_setting("capture_enabled", True)
         app.start_sensor()
+        app.start_watchdog()
     app.sync.start()
     print("Dreams Time → http://127.0.0.1:" + str(args.port), flush=True)
     if not args.no_browser:
@@ -390,6 +420,11 @@ def main():
         pass
     finally:
         app.sync.stop.set()
+        app.watchdog_stop.set()
+        if app.watchdog_thread:
+            app.watchdog_thread.join(timeout=5)
+        if app.sync.thread:
+            app.sync.thread.join(timeout=35)
         app.stop_sensor()
         server.server_close()
         app.tracker.close()

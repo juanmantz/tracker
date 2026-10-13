@@ -94,11 +94,11 @@ class InstallerTests(unittest.TestCase):
 
     def test_update_replaces_old_running_server_and_preserves_data(self):
         init = self.source/'Contents/Resources/project/dreamstime/__init__.py'
-        init.write_text(init.read_text().replace('0.6.1', '0.2.0'))
+        init.write_text(init.read_text().replace('0.7.0', '0.2.0'))
         self.assertEqual(self.run_launcher().returncode, 0)
         first_pid = (self.support/'tracker.pid').read_text()
         token = (self.support/'pairing-token').read_text()
-        init.write_text(init.read_text().replace('0.2.0', '0.6.1'))
+        init.write_text(init.read_text().replace('0.2.0', '0.7.0'))
         self.assertEqual(self.run_launcher().returncode, 0, (self.support/'launcher.log').read_text())
         self.assertNotEqual((self.support/'tracker.pid').read_text(), first_pid)
         self.assertEqual((self.support/'pairing-token').read_text(), token)
@@ -106,7 +106,7 @@ class InstallerTests(unittest.TestCase):
         c=HTTPConnection('127.0.0.1',self.port,timeout=3)
         c.request('GET','/health')
         import json
-        self.assertEqual(json.loads(c.getresponse().read())['version'],'0.6.1')
+        self.assertEqual(json.loads(c.getresponse().read())['version'],'0.7.0')
         c.close()
 
     def test_stale_launch_lock_is_recovered(self):

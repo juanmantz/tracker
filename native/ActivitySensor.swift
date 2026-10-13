@@ -20,6 +20,33 @@ let observers = [
 
 let contextEnabled = CommandLine.arguments.contains("--chatgpt-context")
 var lastContextAt = 0.0
+// Only promote text from an explicitly identified conversation/main region.
+// A whole-window scan may contain unrelated chats in the sidebar.
+func conversationPane(_ root: AXUIElement) -> AXUIElement? {
+    var queue: [AXUIElement] = [root]
+    let deadline = Date().timeIntervalSince1970 + 0.15
+    var visited = 0
+    while !queue.isEmpty && visited < 80 && Date().timeIntervalSince1970 < deadline {
+        let node = queue.removeFirst()
+        visited += 1
+        AXUIElementSetMessagingTimeout(node, 0.04)
+        var roleValue: CFTypeRef?
+        _ = AXUIElementCopyAttributeValue(node, kAXRoleAttribute as CFString, &roleValue)
+        let role = roleValue as? String ?? ""
+        if ["AXTextField", "AXTextArea", "AXSecureTextField", "AXComboBox", "AXOutline", "AXToolbar"].contains(role) { continue }
+        var subrole: CFTypeRef?
+        _ = AXUIElementCopyAttributeValue(node, kAXSubroleAttribute as CFString, &subrole)
+        if subrole as? String == "AXLandmarkMain" { return node }
+        var description: CFTypeRef?
+        _ = AXUIElementCopyAttributeValue(node, kAXDescriptionAttribute as CFString, &description)
+        if ["AXScrollArea", "AXGroup"].contains(role),
+           ["conversation", "chat messages", "main content"].contains((description as? String ?? "").lowercased()) { return node }
+        var children: CFTypeRef?
+        _ = AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &children)
+        if let elements = children as? [AXUIElement] { queue.append(contentsOf: elements.prefix(30)) }
+    }
+    return nil
+}
 func visibleText(_ root: AXUIElement) -> String {
     var queue: [(AXUIElement, Int)] = [(root, 0)]
     var output: [String] = []
@@ -33,7 +60,7 @@ func visibleText(_ root: AXUIElement) -> String {
         _ = AXUIElementCopyAttributeValue(node, kAXRoleAttribute as CFString, &roleValue)
         let role = roleValue as? String ?? ""
         // Do not traverse editable controls: drafts never become context.
-        if ["AXTextField", "AXTextArea", "AXSecureTextField", "AXComboBox"].contains(role) { continue }
+        if ["AXTextField", "AXTextArea", "AXSecureTextField", "AXComboBox", "AXOutline", "AXToolbar"].contains(role) { continue }
         if role == "AXStaticText" {
             var value: CFTypeRef?
             _ = AXUIElementCopyAttributeValue(node, kAXValueAttribute as CFString, &value)
@@ -56,6 +83,7 @@ func emit() {
     var title = ""
     var document = ""
     var contextText = ""
+    var contextScope = "window"
     let bundle = app?.bundleIdentifier ?? ""
     // Browser titles are supplied by the extension, which can exclude private tabs.
     let browsers: Set<String> = ["com.google.Chrome", "com.google.Chrome.beta", "com.microsoft.edgemac", "com.brave.Browser", "company.thebrowser.Browser", "com.apple.Safari", "org.mozilla.firefox"]
@@ -76,7 +104,10 @@ func emit() {
                 document = documentValue as? String ?? (documentValue as? URL)?.absoluteString ?? ""
             }
             if contextEnabled && ["com.openai.chat", "com.openai.chatgpt", "com.openai.codex"].contains(bundle) && Date().timeIntervalSince1970 - lastContextAt > 10 {
-                contextText = visibleText(axWindow)
+                if let pane = conversationPane(axWindow) {
+                    contextText = visibleText(pane)
+                    contextScope = "conversation"
+                } else { contextText = visibleText(axWindow) }
                 lastContextAt = Date().timeIntervalSince1970
             }
         }
@@ -85,7 +116,10 @@ func emit() {
     let locked = session == nil || !sessionActive || !awake || (session?["CGSSessionScreenIsLocked"] as? Bool ?? false) || (session?["kCGSSessionOnConsoleKey"] as? Bool == false) || bundle == "com.apple.loginwindow"
     let idle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: CGEventType(rawValue: UInt32.max)!)
     guard idle.isFinite && idle >= 0 else { fputs("macOS returned an invalid idle duration.\n", stderr); exit(1) }
-    let event: [String: Any] = ["ts": Date().timeIntervalSince1970, "mono": ProcessInfo.processInfo.systemUptime, "app": bundle, "app_name": app?.localizedName ?? "Unknown", "title": title, "document": document, "idle": idle, "locked": locked, "accessibility": trusted, "desktop_context": contextText]
+    let mouseTypes: [CGEventType] = [.mouseMoved, .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .leftMouseDown, .rightMouseDown, .otherMouseDown, .scrollWheel]
+    let mouseIdle = mouseTypes.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? idle
+    let keyboardIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
+    let event: [String: Any] = ["ts": Date().timeIntervalSince1970, "mono": ProcessInfo.processInfo.systemUptime, "app": bundle, "app_name": app?.localizedName ?? "Unknown", "title": title, "document": document, "idle": idle, "mouse_idle": mouseIdle.isFinite ? mouseIdle : idle, "keyboard_idle": keyboardIdle.isFinite ? keyboardIdle : idle, "locked": locked, "accessibility": trusted, "desktop_context": contextText, "context_scope": contextScope]
     if let data = try? JSONSerialization.data(withJSONObject: event) {
         FileHandle.standardOutput.write(data)
         FileHandle.standardOutput.write(Data([10]))

@@ -51,3 +51,8 @@ The user's explicit requirement is a downloadable installable Mac app with very 
 - Label the optional account action Enable saving in Dreams and explain the consequence: authorize sending assigned hours to the existing Dreams account. It is not needed to record activity.
 - Enable completed-week syncing after the account grants authorization. The user can disable it in Settings.
 - Delegate OS permission and package installation controls to macOS. These remain standard system interactions.
+
+
+## 0.7: unattended operation
+
+The user explicitly wants collection, attribution, saving and daily review without repeated actions. Refero status/sync research again returned NO_SUBSCRIPTION; retain the existing reference lock and make behavior/copy changes only. The main view shows automatic save state and the last save time. Save now and manual corrections remain optional recovery controls. Settings has one automatic-saving switch; default is on after the existing account authorization. Technical coordination records stay out of normal product flows.

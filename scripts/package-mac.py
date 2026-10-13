@@ -36,8 +36,8 @@ if args.native_binary:
     shutil.copyfile(ROOT / 'scripts' / 'launch-mac.sh', RESOURCES / 'launch-mac.sh')
 executable.chmod(0o755)
 info = {'CFBundleName':'Dreams Time', 'CFBundleDisplayName':'Dreams Time', 'CFBundleIdentifier':'local.dreamstime.companion',
-        'CFBundleExecutable':'DreamsTime', 'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':'0.6.1',
-        'CFBundleVersion':'7', 'LSUIElement':not bool(args.native_binary), 'LSMinimumSystemVersion':'12.0', 'NSHighResolutionCapable':True,
+        'CFBundleExecutable':'DreamsTime', 'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':'0.7.0',
+        'CFBundleVersion':'8', 'LSUIElement':not bool(args.native_binary), 'LSMinimumSystemVersion':'12.0', 'NSHighResolutionCapable':True,
         'NSAccessibilityUsageDescription':'Dreams Time reads the active document name to identify the project you are working on.',
         'NSAppTransportSecurity':{'NSAllowsLocalNetworking':True}}
 (APP / 'Contents' / 'Info.plist').write_bytes(plistlib.dumps(info))
@@ -55,7 +55,7 @@ readme.write_text(("Small update for an already installed Dreams Time Mac app. R
 Your existing tracking data and settings are kept. The old running version is replaced.
 Open Projects > Connect Dreams to sign in once and load your projects.
 Check project assignments, then click Sync assigned hours to send this week's totals.
-Completed weeks can sync automatically when enabled in Settings.
+Project hours save automatically every five minutes, including the current week.
 
 If macOS blocks the unsigned app, use Privacy & Security > Open Anyway.
 Python, Homebrew and Xcode are not needed. A browser companion is needed only for browser activity.
@@ -63,7 +63,7 @@ The app installs in your user Applications folder. Your activity remains on your
 
 This development app is not signed/notarized and has not been launched on a physical Mac in this Linux build session.
 """)
-OUT = ROOT.parent / ('Dreams-Time-Update-0.6.zip' if args.update_only else 'Dreams-Time-Mac-0.6.zip')
+OUT = ROOT.parent / ('Dreams-Time-Update-0.7.zip' if args.update_only else 'Dreams-Time-Mac-0.7.zip')
 with zipfile.ZipFile(OUT, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
     for p in sorted(APP.rglob('*')):
         archive.write(p, p.relative_to(BUILD))
@@ -73,4 +73,4 @@ with zipfile.ZipFile(OUT) as archive:
     mode = archive.getinfo('Dreams Time.app/Contents/MacOS/DreamsTime').external_attr >> 16
     assert mode & 0o111
     assert not any('activity.sqlite' in p or 'pairing-token' in p for p in archive.namelist())
-print(json.dumps({'file':str(OUT),'bytes':OUT.stat().st_size,'update_only':args.update_only,'version':'0.6.1'}))
+print(json.dumps({'file':str(OUT),'bytes':OUT.stat().st_size,'update_only':args.update_only,'version':'0.7.0'}))

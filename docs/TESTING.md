@@ -45,3 +45,12 @@ A real macOS request to Dreams' public discovery endpoint reproduced the user's 
 CI checks the actual client against live public discovery. The installed-app test also drives the exact Connect API through live discovery and public PKCE client registration, asserting the resulting browser authorization URL, scopes and loopback callback. It does not authenticate an account, obtain tokens, read a live map or write measurements. The isolated provider requires the same headers throughout the full OAuth/refresh/MCP/sync journey and verifies that a denied setup reports its step without exposing remote secrets or losing recorded time.
 
 The installer test starts the prior service with two fictional minutes stored locally, then installs the update and verifies the new version starts, those minutes remain, and pairing and installation identifiers are preserved. Live account consent and arrival of the user's real hours still require verification on their account.
+
+
+## Unattended operation (0.7)
+
+`python3 -m unittest tests.test_automatic -v` accelerates a full eight-hour day through the real SQLite tracker and HTTP OAuth/MCP contract. It switches projects remotely, counts mouse-only activity, removes the full lunch idle tail, overrides focus for a known file, loses connectivity and a committed response, restarts the connection, applies daily corrections and verifies exact measured totals with no duplication. Other cases cover bounded generic-chat corrections, file renames, invalid control data, paused automation, sensor recovery, and the live provider's 20,000-character field limit. No real account receives fixture hours.
+
+The mac-installer job installs the full package, runs the native window/collector, then kills the collector and service deliberately. It checks sensor watchdog recovery, launchd recovery without clicking anything, explicit Quit, reopening, and preservation of existing saved history. Evidence is in `autonomy-check.json` in the Mac proof artifact. These checks distinguish native process recovery from simulated attribution tests.
+
+The earlier manual Sync walkthrough is retained above as historical context; it is not required for 0.7 operation or acceptance. Daily semantic review is a ChatGPT automation using the archived coordination records described in AUTOMATION.md.

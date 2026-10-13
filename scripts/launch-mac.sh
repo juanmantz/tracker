@@ -16,6 +16,11 @@ APP_ARCH="${DREAMSTIME_ARCH:-$(uname -m)}"
 mkdir -p "$APP_SUPPORT"
 APP_LOG="$APP_SUPPORT/launcher.log"
 exec >> "$APP_LOG" 2>&1
+if [[ "${DREAMSTIME_BACKGROUND:-0}" == 1 ]]; then
+  if [[ -e "$APP_SUPPORT/.stopped" ]]; then exit 0; fi
+else
+  rm -f "$APP_SUPPORT/.stopped"
+fi
 
 fail() {
   if [[ "${DREAMSTIME_HEADLESS:-0}" != 1 ]]; then
@@ -25,7 +30,7 @@ fail() {
 }
 trap 'fail "Setup did not finish. Reopen Dreams Time to retry. The setup log is in Library/Application Support/Dreams Time/launcher.log."' ERR
 
-APP_VERSION="0.6.1"
+APP_VERSION="0.7.0"
 open_window() {
   if [[ "${DREAMSTIME_HEADLESS:-0}" != 1 ]]; then
     "$MAC_OPEN" "http://127.0.0.1:$APP_PORT/?welcome=1"
@@ -43,7 +48,7 @@ if [[ "$APP_HEALTH" == *'"app": "dreams-time"'* ]]; then
     fail "An older tracker is open. Click Quit tracker in its settings, then open this update."
   fi
   APP_PAIRING_TOKEN="$(cat "$APP_SUPPORT/pairing-token")"
-  APP_QUIT_STATUS="$(/usr/bin/curl --noproxy '*' --silent --max-time 3 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $APP_PAIRING_TOKEN" -H 'Content-Type: application/json' -d '{}' "http://127.0.0.1:$APP_PORT/api/quit")"
+  APP_QUIT_STATUS="$(/usr/bin/curl --noproxy '*' --silent --max-time 3 -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $APP_PAIRING_TOKEN" -H 'Content-Type: application/json' -d '{"restart":true}' "http://127.0.0.1:$APP_PORT/api/quit")"
   unset APP_PAIRING_TOKEN
   if [[ "$APP_QUIT_STATUS" != 200 ]]; then
     fail "The older tracker could not close. Click Quit tracker in its settings, then open this update."

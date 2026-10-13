@@ -51,6 +51,14 @@ const stateCopy={
   locked:{title:'Your Mac is inactive',text:'Tracking will continue when you return to your Mac.',action:'Pause tracking'},
   excluded:{title:'This activity is not tracked',text:'Private or excluded activity does not add time.',action:'Pause tracking'}
 };
+function automaticStatus(d){
+  if(!d.connected)return d.connecting?'Finish the one-time sign-in in your browser. Tracking continues.':'Connect Dreams once to enable automatic saving.';
+  if(d.automatic===false||d.weekly===false)return 'Automatic saving is paused in Settings. Your activity is kept on this Mac.';
+  if(d.action_required==='sign-in')return 'Dreams authorization expired. Reconnect once in Settings; your recorded hours are safe.';
+  if(d.error||d.pending)return 'Hours are safe on this Mac. Saving will retry automatically.';
+  const saved=d.last?.at?` Last saved ${new Date(d.last.at*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}.`:'';
+  return `Automatic saving is on. Project hours save every five minutes.${saved}`;
+}
 function render(data){
   snapshot=data;
   const r=data.recording||{state:'off',today_seconds:0,sample_count:0,last_sample_age_seconds:null},copy=stateCopy[r.state]||stateCopy.failed;
@@ -64,8 +72,9 @@ function render(data){
   $('#current-label').textContent=r.state==='recording'?'Currently using':'Last detected app';
   $('#current-app').textContent=current?.app_name||'Nothing detected yet';
   $('#current-document').textContent=current?.title||((current?.source==='browser context missing')?'Browser tracking is not connected.':'Document name not available.');
-  $('#current-project').textContent=projects[data.current?.project]||'Not assigned yet';
-  $('#project-evidence').textContent=data.current?.project?(data.recommendation?.reason||data.current.reason):(data.recommendation?.candidates?.length?`Suggested: ${data.recommendation.candidates.map(c=>c.name).join(', ')}. Confirm in Projects.`:'Choose a project once to remember this file.');
+  $('#current-project').textContent=projects[data.current?.project]||'Identifying project';
+  $('#project-evidence').textContent=data.current?.project?(data.recommendation?.reason||data.current.reason):(data.recommendation?.candidates?.length?`Daily review will check ${data.recommendation.candidates.map(c=>c.name).join(', ')}.`:'Activity is saved for the daily project review.');
+  $('#automatic-status').textContent=automaticStatus(data.dreams||{});
   $('#recent-list').replaceChildren();
   data.report.segments.slice(-4).reverse().forEach(segment=>{
     const row=make('div',undefined,'recent-row'),body=make('div');
@@ -103,13 +112,13 @@ function renderProjects(data,names){
   });
   const d=data.dreams||{},assigned=data.report.total_seconds-(data.report.totals.unassigned||0);
   $('#sync').disabled=!d.connected||(!assigned&&!d.weeks?.includes(data.report.week)&&!d.pending)||busy;$('#connect-projects').hidden=!!d.connected;
-  $('#sync-status').textContent=d.error||(!d.connected?'Tracking works already. Sign in only if you want these hours saved in Dreams.':d.pending?'A previous update is waiting to be confirmed. Sync retries that saved request safely.':d.last?`Last sent: ${secondsLabel(d.last.seconds)} for week of ${d.last.week}. ${secondsLabel(data.report.totals.unassigned||0)} unassigned will stay here.`:`${secondsLabel(assigned)} assigned and ready to send. ${secondsLabel(data.report.totals.unassigned||0)} unassigned will stay here.`);
+  $('#sync-status').textContent=automaticStatus(d);
 }
 function renderSettings(data,names){
   $('#accessibility-status').textContent=data.health.accessibility?'Window access is allowed. File and conversation names can be detected.':'Allow access in macOS to detect the file or conversation you are working in.';
   $('#desktop-optin').checked=!!data.desktop_context_enabled;
   const dreams=data.dreams||{};
-  $('#dreams-status').textContent=dreams.error||(dreams.connected?'Saving to Dreams is enabled. Completed weeks sync automatically while tracking runs.':dreams.connecting?'Finish authorizing Dreams Time in your browser. Tracking continues.':'Tracking works without signing in. Authorize sending hours to your Dreams account when you want automatic saving.');
+  $('#dreams-status').textContent=automaticStatus(dreams);
   $('#connect').textContent=dreams.connected?'Sign in again':'Enable saving in Dreams';
   $('#refresh-projects').hidden=$('#disconnect').hidden=!dreams.connected;
   $('#weekly-sync').checked=!!dreams.weekly;$('#weekly-sync').disabled=!dreams.connected;
@@ -157,7 +166,7 @@ window.addEventListener('hashchange',()=>navigate(location.hash.slice(1)));
 $('#dismiss-notice').addEventListener('click',()=>$('#notice').hidden=true);
 $('#tracking-toggle').addEventListener('click',()=>act(toggleTracking));
 $('#assign-project').addEventListener('click',()=>navigate('projects'));
-$('#live-check').addEventListener('click',()=>act(async()=>{await api('/api/quickcheck',{});await refresh();}));
+$('#live-check').addEventListener('click',()=>act(async()=>{await api('/api/quickcheck',{});navigate('tracking');await refresh();}));
 $('#allow-windows').addEventListener('click',()=>act(openPermission));$('#permission').addEventListener('click',()=>act(openPermission));
 $('#week').addEventListener('change',()=>act(refresh));
 $('#project-form').addEventListener('submit',event=>{event.preventDefault();act(async()=>{await api('/api/projects',{name:$('#project-name').value});$('#project-name').value='';message('Project added. Choose it for the activities below.');await refresh();});});
@@ -167,11 +176,11 @@ async function connectDreams(){message('Opening authorization to save your hours
 $('#connect').addEventListener('click',()=>act(connectDreams));$('#connect-projects').addEventListener('click',()=>act(connectDreams));
 $('#refresh-projects').addEventListener('click',()=>act(async()=>{const result=await api('/api/dreams/refresh',{});message(`${result.projects} Dreams projects loaded. Existing activity was checked for matches.`);await refresh();}));
 $('#disconnect').addEventListener('click',()=>act(async()=>{await api('/api/dreams/disconnect',{});message('Dreams disconnected. Your recorded hours are kept.');await refresh();}));
-$('#weekly-sync').addEventListener('change',e=>act(async()=>{await api('/api/dreams/weekly',{enabled:e.target.checked});message(e.target.checked?'Completed weeks will sync while Dreams Time is open.':'Automatic weekly sync is off.');await refresh();}));
+$('#weekly-sync').addEventListener('change',e=>act(async()=>{await api('/api/dreams/automatic',{enabled:e.target.checked});message(e.target.checked?'Project matching and saving will run automatically.':'Automatic saving is paused.');await refresh();}));
 $('#sync').addEventListener('click',()=>act(async()=>{
   busy=true;$('#sync').disabled=true;$('#sync').textContent='Sending…';
   try{const result=await api('/api/dreams/sync',{week:snapshot.report.week});message(result.unchanged?'Dreams already has these totals.':`${secondsLabel(result.seconds)} sent to Dreams for week of ${result.week}. ${secondsLabel(result.unassigned_seconds)} remains unassigned.`);}
-  finally{busy=false;$('#sync').textContent='Sync assigned hours';await refresh();}
+  finally{busy=false;$('#sync').textContent='Save now';await refresh();}
 }));
 $('#dreams-file').addEventListener('change',e=>act(()=>importFile(e,'/api/dreams/import','map',r=>`${r.projects} Dreams projects connected.`)));
 $('#chatgpt-file').addEventListener('change',e=>act(()=>importFile(e,'/api/chatgpt/import','conversations',r=>`${r.conversations} conversations imported as context. No time was added.`)));

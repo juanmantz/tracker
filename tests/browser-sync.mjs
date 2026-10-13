@@ -26,12 +26,12 @@ try{
   await generic.getByText('Assigned to Birch Client · Manually assigned activity',{exact:true}).waitFor();
   checks.push('Confirm a conversation match and assign an unnamed desktop activity without saving a generic title rule');
   await page.locator('#sync').click();await page.getByText('2m 00s sent to Dreams',{exact:false}).waitFor();
-  await page.locator('#sync-status').filter({hasText:'Last sent: 2m 00s'}).waitFor();
+  await page.locator('#sync-status').filter({hasText:'Last saved'}).waitFor();
   await page.locator('#sync').click();await page.getByText('Dreams already has these totals.',{exact:true}).waitFor();
   checks.push('Direct Sync writes assigned Worked totals and repeat sync reports unchanged totals');
   await fs.mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/project-sync.png',fullPage:true});
   await page.getByRole('button',{name:'Settings',exact:true}).click();assert.equal(await page.locator('#weekly-sync').isChecked(),true);await page.locator('#weekly-sync').uncheck();await page.locator('#weekly-sync').check();
-  await page.getByText('Completed weeks will sync while Dreams Time is open.',{exact:true}).waitFor();
+  await page.getByText('Project matching and saving will run automatically.',{exact:true}).waitFor();
   await page.locator('#refresh-projects').click();await page.getByText('2 Dreams projects loaded.',{exact:false}).waitFor();
   await page.getByRole('button',{name:'Projects',exact:true}).click();
   await generic.getByText('Assigned to Birch Client · Manually assigned activity',{exact:true}).waitFor();
