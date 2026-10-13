@@ -141,6 +141,30 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(self.provider.writes[0]['commands'][0]['measurement']['id'],self.provider.writes[1]['commands'][0]['measurement']['id'])
         self.assertNotIn('Renamed file',json.dumps(self.provider.writes))
 
+    def test_identified_app_headers_survive_discovery_oauth_refresh_and_mcp(self):
+        self.provider.require_app_headers = True
+        self.connect(); self.activity()
+        self.app.connection.credentials['expires_at'] = 0
+        status, result = self.api('/api/dreams/sync', {'week':'2026-10-05'})
+        self.assertEqual(status, 200, result)
+        self.assertEqual(result['seconds'], 60)
+        self.assertEqual(self.provider.refresh_count, 1)
+        self.assertEqual(self.hours(), [round(60/3600, 6)])
+
+    def test_setup_denial_identifies_the_step_without_exposing_remote_secrets(self):
+        self.activity()
+        for path, step in (('/.well-known/oauth-authorization-server', 'sign-in setup'),
+                           ('/oauth/register', 'app registration')):
+            with self.subTest(path=path):
+                self.provider.denied_path = path
+                status, body = self.api('/api/dreams/connect', {})
+                self.assertEqual(status, 400)
+                self.assertIn(step, body['error'])
+                self.assertIn('HTTP 403', body['error'])
+                self.assertNotIn('PRIVATE', json.dumps(body))
+                self.assertIsNone(self.app.connection.pending)
+                self.assertEqual(self.app.tracker.report('2026-10-05')['total_seconds'], 60)
+
     def test_unknown_write_outcome_retries_identical_request_after_restart(self):
         self.connect(); self.activity(); self.provider.fail_after_write=True
         self.assertEqual(self.api('/api/dreams/sync', {'week':'2026-10-05'})[0],400)

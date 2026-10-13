@@ -25,7 +25,7 @@ fail() {
 }
 trap 'fail "Setup did not finish. Reopen Dreams Time to retry. The setup log is in Library/Application Support/Dreams Time/launcher.log."' ERR
 
-APP_VERSION="0.6.0"
+APP_VERSION="0.6.1"
 open_window() {
   if [[ "${DREAMSTIME_HEADLESS:-0}" != 1 ]]; then
     "$MAC_OPEN" "http://127.0.0.1:$APP_PORT/?welcome=1"

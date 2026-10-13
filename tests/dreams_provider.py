@@ -28,6 +28,8 @@ class Provider:
         self.fail_after_write = False
         self.force_conflict = False
         self.refresh_count = 0
+        self.require_app_headers = False
+        self.denied_path = None
         self.server = ThreadingHTTPServer(('127.0.0.1', 0), self.handler())
         self.origin = f'http://127.0.0.1:{self.server.server_port}'
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -52,6 +54,8 @@ class Provider:
 
             def do_GET(self):
                 path = urlsplit(self.path).path
+                if path == '/.well-known/oauth-authorization-server' and self.blocked(path):
+                    return
                 if path == '/.well-known/oauth-authorization-server':
                     return self.send(200, {'issuer': provider.origin, 'authorization_endpoint': provider.origin + '/oauth/authorize', 'token_endpoint': provider.origin + '/oauth/token', 'registration_endpoint': provider.origin + '/oauth/register'})
                 if path == '/oauth/authorize':
@@ -72,6 +76,8 @@ class Provider:
             def do_POST(self):
                 path = urlsplit(self.path).path
                 raw = self.rfile.read(int(self.headers['Content-Length']))
+                if self.blocked(path):
+                    return
                 data = {k:v[0] for k,v in parse_qs(raw.decode()).items()} if path == '/oauth/token' else json.loads(raw)
                 if path == '/oauth/register':
                     assert data['token_endpoint_auth_method'] == 'none'
@@ -137,4 +143,13 @@ class Provider:
                 self.send_header('Content-Length', str(len(body)))
                 self.end_headers()
                 self.wfile.write(body)
+
+            def blocked(self, path):
+                unidentified = (not self.headers.get('User-Agent', '').startswith('DreamsTime/')
+                                or 'application/json' not in self.headers.get('Accept', ''))
+                if provider.denied_path == path or (provider.require_app_headers and unidentified):
+                    self.send(403, {'error': 'Cloudflare blocked this client', 'code': 'PRIVATE-CODE',
+                                    'access_token': 'PRIVATE-TOKEN'})
+                    return True
+                return False
         return Handler

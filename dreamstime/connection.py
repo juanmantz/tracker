@@ -15,6 +15,8 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
+from . import __version__
+
 ORIGIN = 'https://dreams.checklists.workers.dev'
 
 
@@ -57,7 +59,13 @@ class DreamsConnection:
 
     def request(self, url, data=None, *, form=False, headers=None):
         body = None if data is None else (urlencode(data).encode() if form else json.dumps(data).encode())
-        request = Request(url, data=body, headers={**({'Content-Type': 'application/x-www-form-urlencoded' if form else 'application/json'} if body is not None else {}), **(headers or {})})
+        # Cloudflare rejects Python-urllib's default identity before requests reach
+        # Dreams. Identify our app honestly and retain MCP's explicit SSE Accept.
+        request = Request(url, data=body, headers={
+            'User-Agent': f'DreamsTime/{__version__} (macOS)',
+            'Accept': 'application/json',
+            **({'Content-Type': 'application/x-www-form-urlencoded' if form else 'application/json'} if body is not None else {}),
+            **(headers or {})})
         try:
             with urlopen(request, timeout=20) as response:
                 raw = response.read(16 * 1024 * 1024).decode()
@@ -66,12 +74,16 @@ class DreamsConnection:
             # Do not echo remote bodies: they can contain codes or tokens.
             if exc.code == 401:
                 raise ConnectionError('Dreams sign-in expired. Connect Dreams again.') from None
-            raise ConnectionError(f'Dreams returned HTTP {exc.code}. Try again.') from None
+            step = { '/.well-known/oauth-authorization-server': 'sign-in setup',
+                     '/oauth/register': 'app registration', '/oauth/token': 'sign-in',
+                     '/mcp': 'sync connection' }.get(urlsplit(url).path, 'connection')
+            raise ConnectionError(f'Dreams could not complete {step} (HTTP {exc.code}). Your hours remain saved.') from None
         except (URLError, TimeoutError, OSError):
             raise ConnectionError('Could not reach Dreams. Your hours remain saved; retry when online.') from None
 
     def begin(self):
         with self.lock:
+            self.pending = None
             metadata = json.loads(self.request(self.origin + '/.well-known/oauth-authorization-server')[0])
             # Discovery cannot redirect tokens to a different host.
             for name in ('authorization_endpoint', 'token_endpoint', 'registration_endpoint'):
@@ -162,7 +174,7 @@ class DreamsConnection:
     def call(self, name, arguments=None):
         with self.lock:
             if not self.session:
-                initialized = self.rpc('initialize', {'protocolVersion': self.protocol, 'capabilities': {}, 'clientInfo': {'name': 'Dreams Time', 'version': '0.5.0'}})
+                initialized = self.rpc('initialize', {'protocolVersion': self.protocol, 'capabilities': {}, 'clientInfo': {'name': 'Dreams Time', 'version': __version__}})
                 self.protocol = initialized.get('protocolVersion', self.protocol)
                 self.rpc('notifications/initialized', {}, notification=True)
                 # Stateless servers return no session ID; still initialized for this call.

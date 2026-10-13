@@ -37,3 +37,11 @@ The Mac workflow compiles universal arm64/x86_64 native window and collector exe
 The first real Mac run exposed a Ref-bridging failure in the earlier JXA collector. Shipping the compiled Swift collector removed that scripting dependency. The complete installed native app now runs with its own window and Dock icon. Raw personal bootstrap catalogs are excluded from Git and CI; the app payload and BOM remain unchanged during personalization.
 
 This establishes actual macOS installation/startup/window/capture behavior. User-specific Gatekeeper, Accessibility approval and live account consent remain separate OS/account actions. The package is not notarized.
+
+## Live connection regression (0.6.1)
+
+A real macOS request to Dreams' public discovery endpoint reproduced the user's pre-sign-in HTTP 403 with Python-urllib's defaults. An honest `DreamsTime` User-Agent and `Accept: application/json` received HTTP 200 and valid discovery metadata. The production client now supplies those headers for discovery, registration, token exchange, refresh and MCP; MCP keeps its JSON/SSE Accept header.
+
+CI checks the actual client against live public discovery. The installed-app test also drives the exact Connect API through live discovery and public PKCE client registration, asserting the resulting browser authorization URL, scopes and loopback callback. It does not authenticate an account, obtain tokens, read a live map or write measurements. The isolated provider requires the same headers throughout the full OAuth/refresh/MCP/sync journey and verifies that a denied setup reports its step without exposing remote secrets or losing recorded time.
+
+The installer test starts the prior service with two fictional minutes stored locally, then installs the update and verifies the new version starts, those minutes remain, and pairing and installation identifiers are preserved. Live account consent and arrival of the user's real hours still require verification on their account.

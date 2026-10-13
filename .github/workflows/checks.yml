@@ -60,6 +60,7 @@ jobs:
       - name: Check public Dreams connection setup without accessing an account
         run: python3 scripts/check-dreams-connection.py > dreams-connection-check.json
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: dreams-connection-check
           path: dreams-connection-check.json
