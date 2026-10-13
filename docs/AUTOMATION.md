@@ -71,6 +71,40 @@ Worked measurements in the automation: only native measured seconds are a source
 of truth. The app resends stable per-device/project/week snapshots, including
 zero corrections. Unknown network outcomes retain exact durable outbox requests.
 
+## Completed hours in Dreams
+
+The opt-in server policy in `integrations/dreams/whole-hour-policy.mjs` supports
+installed 0.7 clients without another Mac installation. Preserve this key in the
+private control note when updating focus or daily attribution:
+
+```json
+{"sync_policy":{"schema":"dreamstime/whole-hours/v1","minimum_hours":1,"rounding":"floor","period":"Week"}}
+```
+
+The versioned policy publishes completed whole hours per destination and week.
+50 minutes produces no measurement; 80 minutes publishes 1 hour; 120 minutes
+publishes 2 hours. Precise seconds stay on the Mac. A downward correction below
+one hour removes its previous snapshot. Manual measurements and planned capacity
+remain untouched. Full Monday–Sunday tracker ranges become `Week` measurements
+so existing weekly project and goal accounting can include them. Suppressed or
+unchanged snapshots do not increment the map revision or create audit entries.
+
+Parent totals use Dreams' existing `Part of` and resource-provider hierarchy;
+do not write a second copy of child hours to a parent. Parent work periods should
+be `Week` with no fixed `periodDate`, so the display advances automatically.
+Run `npm run test:dreams-policy` for boundary and correction tests. To exercise
+the actual deployed accounting and storage implementation, download its modules
+privately and run:
+
+```sh
+DREAMS_WORKER_DIR=/path/to/deployment node --test tests/dreams-worker-integration.mjs
+```
+
+`patch-worker.mjs` verifies the reviewed deployment's SHA-256 before inserting
+the storage hook. A changed deployment requires source review and a new baseline;
+never patch an unexpected build. Retain the original modules/settings privately
+for rollback, and preserve the existing authentication and secret bindings.
+
 ## Recovery and limits
 
 The in-process watchdog restarts a dead or stalled native sensor, at most once

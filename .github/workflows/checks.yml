@@ -18,6 +18,7 @@ jobs:
       - run: python3 -m unittest discover -s tests -v
       - run: npm run test:extension
       - run: npm run test:sensor
+      - run: npm run test:dreams-policy
       - run: npx playwright install --with-deps chromium
       - run: |
           CHROMIUM_PATH="$(node --input-type=module -e 'import {chromium} from "@playwright/test"; console.log(chromium.executablePath())')" npm run test:ui
