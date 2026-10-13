@@ -49,3 +49,17 @@ jobs:
           print('Native sensor emitted the expected event contract.')
           PY
       - run: python3 -m unittest discover -s tests -v
+  live-sign-in-discovery:
+    runs-on: macos-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check public Dreams connection setup without accessing an account
+        run: python3 scripts/check-dreams-connection.py > dreams-connection-check.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dreams-connection-check
+          path: dreams-connection-check.json
