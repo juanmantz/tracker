@@ -45,7 +45,7 @@ def compact_card(value):
             break
     if not labels and kind != 'call':
         return None
-    result = {'kind': kind, 'scope': scope, 'source': 'accessibility', 'labels': labels}
+    result = {'kind': kind, 'scope': scope, 'source': 'accessibility', 'labels': sorted(labels, key=str.casefold)}
     if kind == 'call':
         result['state'] = 'connected' if value.get('state') == 'connected' else 'uncertain'
     while len(encoded(result)) > MAX_CARD_BYTES and result['labels']:

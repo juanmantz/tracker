@@ -76,6 +76,8 @@ class SnapshotTests(unittest.TestCase):
                     call_proof='end-control+duration',ax_trusted=True,window_access_status='readable',
                     context_snapshot={**card('Podcast partner','call','call_controls'),'state':'connected'})
         self.sample(902)
+        call_segment=self.t.report('2026-10-05')['segments'][-1]
+        self.t.assign_activity(call_segment['id'],'atlas')
         payload=Coordination(self.t,None,'fixture').review_payload(BASE+904)
         self.assertLessEqual(len(json.dumps(payload,separators=(',',':'))),18000)
         self.assertEqual(payload['activities'][0]['kind'],'call')

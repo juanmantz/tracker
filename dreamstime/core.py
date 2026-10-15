@@ -396,7 +396,7 @@ class Tracker:
                 self.session = None
             elif self.session["app"] == context["app"] and self.session["title"] == context["title"]:
                 project, reason = self.session["project"], "Explicit current session"
-        if sample.get("desktop_context") and not self.paused:
+        if sample.get("desktop_context") and not self.paused and not sample.get("locked") and not context["excluded"]:
             self.desktop_context = {"app": context["app"], "title": context["title"], "identity": context['identity'], "at": ts, "text": str(sample["desktop_context"])[:8000], "scope": sample.get('context_scope', 'window'), "source": "Visible accessibility text"}
         connected_call = context.get('activity_kind') == 'call'
         effective_idle = 0 if connected_call else idle

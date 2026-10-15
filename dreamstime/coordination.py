@@ -120,7 +120,7 @@ class Coordination:
         def priority(row):
             quality = 3 if row.get('kind') == 'call' else (
                 2 if row.get('_snapshot') or row['candidates'] else (1 if row['can_remember'] else 0))
-            return (row['project'] is not None, -quality, -row['end'], -row['seconds'])
+            return (-quality, row['project'] is not None, -row['end'], -row['seconds'])
         ordered = sorted(rows.values(), key=priority)
         payload = {'schema': REVIEW_SCHEMA, 'device': self.installation, 'version': __version__,
             'updated_at': now, 'timezone': self.tracker.timezone, 'paused': self.tracker.paused,
