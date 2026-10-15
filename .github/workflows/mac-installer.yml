@@ -1,7 +1,7 @@
 name: Build and install Mac app
 on:
   push:
-    branches: [main, mac-installer]
+    branches: [main, mac-installer, app-icon]
   workflow_dispatch:
 permissions:
   contents: write
@@ -42,7 +42,7 @@ jobs:
           python3 - <<'PY'
           import json
           h=json.load(open('artifacts/native-release/health.json'))
-          assert h['app']=='dreams-time' and h['version']=='0.8.1' and h['capture_host']=='app'
+          assert h['app']=='dreams-time' and h['version']=='0.8.2' and h['capture_host']=='app'
           s=json.load(open('artifacts/native-release/native-sample.json'))
           assert isinstance(s['app'],str) and s['idle']>=0 and isinstance(s['accessibility'],bool)
           import time, urllib.request
@@ -71,9 +71,11 @@ jobs:
         run: python3 tests/mac_autonomy_check.py
       - name: Prove Accessibility and document capture in the installed app process
         run: python3 tests/mac_ax_capture_check.py
+      - name: Verify the real installed native app icon
+        run: python3 tests/mac_app_icon_check.py
       - uses: actions/upload-artifact@v4
         with:
-          name: Dreams-Time-0.8.1-Update
+          name: Dreams-Time-0.8.2-Update
           path: artifacts/native-release/Dreams-Time-Update.pkg
           compression-level: 0
       - name: Split download into manageable artifacts
@@ -109,16 +111,18 @@ jobs:
             artifacts/native-release/live-setup-check.json
             artifacts/native-release/autonomy-check.json
             artifacts/native-release/ax-capture-check.json
+            artifacts/native-release/icon-check.json
+            artifacts/native-release/installed-icon.png
       - name: Publish direct installer downloads after successful Mac verification
-        if: github.event_name == 'push' && github.ref == 'refs/heads/mac-installer'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/mac-installer' || github.ref == 'refs/heads/app-icon')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          Path("artifacts/native-release/release-notes.txt").write_text("Dreams Time 0.8.1 retires surviving legacy GUI/backend processes during installation and enforces app-owned native collection. Collector diagnostics publish promptly after changes.\n\nExisting installations: use Dreams-Time-Update.pkg. Recorded activity, pairing and private runtimes are preserved. New installations: use Dreams-Time-Installer.pkg.\n")
+          Path("artifacts/native-release/release-notes.txt").write_text("Dreams Time 0.8.2 adds a distinctive native app icon: a white D-shaped clock with mint hands on dark forest green. The icon is part of the signed bundle and is verified through macOS app-icon lookup. Existing tracking history, pairing and private runtimes are preserved. macOS may require replacing the previous Accessibility permission entry for this updated development build.\n\nExisting installations: use Dreams-Time-Update.pkg. Recorded activity, pairing and private runtimes are preserved. New installations: use Dreams-Time-Installer.pkg.\n")
           PY
-          if ! gh release view v0.8.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create v0.8.1 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dreams Time 0.8.1" --notes-file artifacts/native-release/release-notes.txt
+          if ! gh release view v0.8.2 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create v0.8.2 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dreams Time 0.8.2" --notes-file artifacts/native-release/release-notes.txt
           fi
-          gh release upload v0.8.1 --repo "$GITHUB_REPOSITORY" artifacts/native-release/Dreams-Time-Update.pkg artifacts/native-release/Dreams-Time-Installer.pkg --clobber
+          gh release upload v0.8.2 --repo "$GITHUB_REPOSITORY" artifacts/native-release/Dreams-Time-Update.pkg artifacts/native-release/Dreams-Time-Installer.pkg artifacts/app-icon/Dreams-Time-Icon.png artifacts/app-icon/Dreams-Time-Icon-128.png --clobber

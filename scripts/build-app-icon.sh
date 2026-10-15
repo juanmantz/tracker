@@ -11,13 +11,4 @@ for ICON_SIZE in 16 32 128 256 512; do
 done
 /usr/bin/iconutil -c icns "$ICON_SET" -o "$ICON_ROOT/native/AppIcon.icns"
 cp "$ICON_SET/icon_512x512@2x.png" "$ICON_OUTPUT/Dreams-Time-Icon.png"
-mkdir -p "$ICON_OUTPUT/scripts"
-for ICON_ARCH in arm64 x86_64; do
-  /usr/bin/xcrun swiftc -swift-version 5 -O -target "$ICON_ARCH-apple-macos12.0" "$ICON_ROOT/native/SetAppIcon.swift" -o "$ICON_OUTPUT/set-app-icon-$ICON_ARCH"
-done
-/usr/bin/lipo -create "$ICON_OUTPUT/set-app-icon-arm64" "$ICON_OUTPUT/set-app-icon-x86_64" -output "$ICON_OUTPUT/scripts/set-app-icon"
-/usr/bin/codesign --force --sign - "$ICON_OUTPUT/scripts/set-app-icon"
-cp "$ICON_ROOT/native/AppIcon.icns" "$ICON_OUTPUT/scripts/AppIcon.icns"
-cp "$ICON_ROOT/scripts/icon-pkg-postinstall" "$ICON_OUTPUT/scripts/postinstall"
-chmod 755 "$ICON_OUTPUT/scripts/postinstall" "$ICON_OUTPUT/scripts/set-app-icon"
-/usr/bin/pkgbuild --nopayload --identifier local.dreamstime.icon --version 1.0.0 --scripts "$ICON_OUTPUT/scripts" "$ICON_OUTPUT/Dreams-Time-Icon.pkg"
+cp "$ICON_SET/icon_128x128.png" "$ICON_OUTPUT/Dreams-Time-Icon-128.png"
