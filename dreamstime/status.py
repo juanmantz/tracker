@@ -27,7 +27,7 @@ def recording_status(tracker, now, *, enabled, running, error=None, samples=0):
     elif not running:
         state, detail = 'failed', 'The capture process stopped. Restart capture.'
     elif current and current['active']:
-        state, detail = 'recording', 'Actual foreground activity is being saved.'
+        state, detail = 'recording', ('A connected call is being timed, including listening time.' if current['context'].get('activity_kind') == 'call' else 'Actual foreground activity is being saved.')
     elif current and current['idle'] >= tracker.idle_after:
         state, detail = 'idle', 'You are idle. The idle tail is excluded from recorded time.'
     elif current and current['context']['source'] == 'browser context missing':

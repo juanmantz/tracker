@@ -1,5 +1,7 @@
 import AppKit
 import WebKit
+import ApplicationServices
+import Darwin
 
 // The shipped executable owns the window. Python is private, bundled service code.
 final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKScriptMessageHandler {
@@ -7,6 +9,7 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
     var webView: WKWebView!
     var loading: NSTextField!
     var background = CommandLine.arguments.contains("--background")
+    var permissionPrompted = false
     var nativeTimer: Timer?
     var serviceStarting = false
     var samplePending = false
@@ -53,6 +56,9 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
         loading.font = .systemFont(ofSize: 20)
         loading.autoresizingMask = [.width, .minYMargin, .maxYMargin]
         window.contentView!.addSubview(loading)
+        DistributedNotificationCenter.default().addObserver(self,
+            selector: #selector(reopenRequested(_:)), name: Notification.Name("local.dreamstime.reopen"),
+            object: nil, suspensionBehavior: .deliverImmediately)
         if !background { showWindow() }
         startService()
         if smokeTest {
@@ -92,7 +98,7 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
         // The sampler lives in this exact process and bundle, never Python or
         // a differently signed helper. This is the identity shown in Settings.
         nativeTimer = startNativeActivitySensor(
-            requestPermission: !background,
+            requestPermission: false,
             contextEnabled: { self.desktopContextEnabled },
             enabled: { !self.nativePaused }
         ) { sample in self.submitSample(sample) }
@@ -142,7 +148,19 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
         if alert.runModal() == .alertFirstButtonReturn { startService() }
     }
 
+    @objc func reopenRequested(_ notification: Notification) {
+        showWindow()
+        startService()
+    }
+
     @objc func showWindow() {
+        background = false
+        NSApp.setActivationPolicy(.regular)
+        if !smokeTest && !permissionPrompted && !AXIsProcessTrusted() {
+            permissionPrompted = true
+            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+            _ = AXIsProcessTrustedWithOptions(options)
+        }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -232,11 +250,42 @@ func makeLauncher() -> Process {
 
 @main
 struct DreamsTimeMain {
+    private static var instanceLock: Int32 = -1
+
+    static func claimInstance() -> Bool {
+        let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Dreams Time")
+        do {
+            try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true,
+                                                   attributes: [.posixPermissions: 0o700])
+        } catch { return false }
+        let path = support.appendingPathComponent(".native-instance.lock").path
+        let descriptor = Darwin.open(path, O_CREAT | O_RDWR, mode_t(0o600))
+        guard descriptor >= 0 else { return false }
+        var recordLock = Darwin.flock()
+        recordLock.l_type = Int16(F_WRLCK)
+        recordLock.l_whence = Int16(SEEK_SET)
+        recordLock.l_start = 0
+        recordLock.l_len = 0
+        guard Darwin.fcntl(descriptor, F_SETLK, &recordLock) == 0 else {
+            Darwin.close(descriptor)
+            if !CommandLine.arguments.contains("--background") {
+                DistributedNotificationCenter.default().postNotificationName(
+                    Notification.Name("local.dreamstime.reopen"), object: nil, userInfo: nil,
+                    deliverImmediately: true)
+            }
+            return false
+        }
+        _ = Darwin.fcntl(descriptor, F_SETFD, FD_CLOEXEC)
+        instanceLock = descriptor // The OS releases this lock even after a crash.
+        return true
+    }
+
     static func main() {
         if CommandLine.arguments.contains("--background") {
             let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Dreams Time/.stopped")
             if FileManager.default.fileExists(atPath: support.path) { exit(0) }
         }
+        if !CommandLine.arguments.contains("--smoke-test") && !claimInstance() { exit(0) }
         let app = NSApplication.shared
         app.setActivationPolicy(CommandLine.arguments.contains("--background") ? .accessory : .regular)
         let delegate = DreamsTimeApp()

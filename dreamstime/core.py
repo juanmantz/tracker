@@ -11,6 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 from .recognition import recognize, WORK_KINDS, normalize, GENERIC
+from .context_snapshots import ContextSnapshots, verified_call, CALL_APPS
 
 BROWSERS = {"com.google.Chrome", "com.google.Chrome.beta", "com.microsoft.edgemac", "com.brave.Browser", "company.thebrowser.Browser", "com.apple.Safari", "org.mozilla.firefox"}
 BROWSER_FAMILIES = {"com.google.Chrome": "chrome", "com.google.Chrome.beta": "chrome", "com.microsoft.edgemac": "edge", "com.brave.Browser": "brave", "company.thebrowser.Browser": "arc"}
@@ -65,20 +66,29 @@ def digest(value):
 
 
 def context_key(context):
-    # An opaque association key. No URL, path or conversation text leaves the Mac.
+    # Keep legacy keys byte-compatible so existing associations/corrections survive.
+    if context.get('call_session'):
+        return digest(['call', context.get('app'), context['call_session']])
     if context.get('identity'):
         return digest(['identity', context['identity']])
-    return digest([context.get(k, '') for k in ('app', 'identity', 'title')] +
-                  [sorted(h['project'] for h in context.get('project_hints', []) if isinstance(h, dict) and isinstance(h.get('project'), str))])
+    values = [context.get(k, '') for k in ('app', 'identity', 'title')] + [
+        sorted(h['project'] for h in context.get('project_hints', [])
+               if isinstance(h, dict) and isinstance(h.get('project'), str))]
+    if context.get('snapshot_id'):
+        values.append(context['snapshot_id'])
+    return digest(values)
 
 
 def rememberable(context):
-    if context.get('excluded'):
+    if (context.get('excluded') or context.get('activity_kind') == 'call'
+            or (context.get('app') in CALL_APPS and re.search(r'\b(call|meeting|huddle)\b', context.get('title', ''), re.I))):
         return False
     if context.get('identity'):
         return True
     if context.get('app') in ('com.openai.chat', 'com.openai.chatgpt', 'com.openai.codex'):
         return False  # Repeated generic desktop chat titles are not conversation IDs.
+    if normalize(context.get('title', '')) == normalize(context.get('app_name', '')):
+        return False
     meaningful = set(normalize(context.get('title', '')).split()) - GENERIC - {'untitled', 'draft', 'new', 'window'}
     return bool(meaningful)
 
@@ -126,6 +136,7 @@ class Tracker:
         self.run_start = None
         self.session = None
         self.desktop_context = None
+        self.context_snapshots = ContextSnapshots(self.db)
 
     def setting(self, key, default=None):
         with self.lock:
@@ -242,7 +253,7 @@ class Tracker:
         # a unique project mention. Whole-window/sidebar text remains a suggestion.
         if context.get('context_scope') == 'conversation' and len(result['candidates']) == 1:
             return {'project': result['candidates'][0]['project'], 'confidence': 'high', 'reason': 'Project in the current conversation', 'candidates': result['candidates']}
-        if at is not None and context.get('app') in FOCUS_APPS:
+        if at is not None and (context.get('app') in FOCUS_APPS or context.get('activity_kind') == 'call'):
             focus = next((f for f in reversed(self.setting('focus_history', [])) if f['at'] <= at), None)
             if focus and focus['project'] in valid:
                 return {'project': focus['project'], 'confidence': 'confirmed', 'reason': 'Current project set in ChatGPT', 'candidates': result['candidates']}
@@ -317,7 +328,10 @@ class Tracker:
         app = sample.get("app", "")[:200]
         title = sample.get("title", "")[:500]
         context = {"app": app, "app_name": sample.get("app_name", app)[:200], "title": title, "url": "", "identity": "", "source": "window", "excluded": app in EXCLUDED_APPS or not app}
-        if app not in BROWSERS and not context["excluded"]:
+        if self.desktop_context and (sample.get('locked') or sample['ts'] - self.desktop_context['at'] > 12 or
+                any(self.desktop_context.get(k, '') != context.get(k, '') for k in ('app', 'title'))):
+            self.desktop_context = None
+        if app not in BROWSERS and not context["excluded"] and not sample.get('locked'):
             document, ident = document_identity(sample.get("document", ""))
             context.update(document=document, identity=ident)
             if document.startswith("http"):
@@ -346,6 +360,19 @@ class Tracker:
                 context["excluded"] = True
         if context["excluded"]:
             context.update(title="", url="", identity="", document="")
+        elif not sample.get('locked') and self.setting('desktop_context_enabled', True):
+            if verified_call(sample):
+                context.update(activity_kind='call', call_session=sample['call_session'])
+            snapshot = self.context_snapshots.put(sample.get('context_snapshot'), sample['ts'])
+            if snapshot:
+                context['snapshot_id'] = snapshot
+                card = self.context_snapshots.get(snapshot)
+                if card and card['labels']:
+                    suggested = recognize(context, self.setting('recognition_catalog', []), snippets=card['labels'])
+                    ids = {x['project'] for x in context.get('project_hints', [])}
+                    ids.update(x['project'] for x in suggested['candidates'])
+                    if ids:
+                        context['project_hints'] = [{'project': p} for p in sorted(ids)]
         return context
 
     def ingest(self, sample):
@@ -369,23 +396,25 @@ class Tracker:
                 self.session = None
             elif self.session["app"] == context["app"] and self.session["title"] == context["title"]:
                 project, reason = self.session["project"], "Explicit current session"
-        if sample.get("desktop_context") and not self.paused:
+        if sample.get("desktop_context") and not self.paused and not sample.get("locked") and not context["excluded"]:
             self.desktop_context = {"app": context["app"], "title": context["title"], "identity": context['identity'], "at": ts, "text": str(sample["desktop_context"])[:8000], "scope": sample.get('context_scope', 'window'), "source": "Visible accessibility text"}
-        active = not (self.paused or sample.get("locked") or idle >= self.idle_after or context["excluded"])
+        connected_call = context.get('activity_kind') == 'call'
+        effective_idle = 0 if connected_call else idle
+        active = not (self.paused or sample.get("locked") or effective_idle >= self.idle_after or context["excluded"])
         current = {"ts": ts, "mono": mono, "idle": idle, "active": active, "context": context, "project": project, "reason": reason}
         prev = self.previous
         with self.db:
-            if idle >= self.idle_after:
+            if effective_idle >= self.idle_after:
                 # Once idle is confirmed, remove the entire idle tail, including grace time.
                 last_input = max(self.run_start, ts - idle)
-                self.db.execute("DELETE FROM segments WHERE start>=?", (last_input,))
-                self.db.execute("UPDATE segments SET end=? WHERE start<? AND end>?", (last_input, last_input, last_input))
+                self.db.execute("DELETE FROM segments WHERE start>=? AND json_extract(context,'$.activity_kind') IS NOT 'call'", (last_input,))
+                self.db.execute("UPDATE segments SET end=? WHERE start<? AND end>? AND json_extract(context,'$.activity_kind') IS NOT 'call'", (last_input, last_input, last_input))
             if prev:
                 delta, elapsed = ts - prev["ts"], mono - prev["mono"]
                 if delta > self.max_gap or elapsed <= 0 or abs(delta - elapsed) > 3:
                     self.health["gaps"] += 1
                 elif prev["active"] and not self.paused and not sample.get("locked"):
-                    end = min(ts, ts - idle) if idle >= self.idle_after else ts
+                    end = min(ts, ts - idle) if effective_idle >= self.idle_after and prev['context'].get('activity_kind') != 'call' else ts
                     if end > prev["ts"]:
                         self.add_segment(prev["ts"], end, prev["context"], prev["project"], prev["reason"])
         self.previous = current
