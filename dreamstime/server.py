@@ -191,6 +191,10 @@ class App:
         ts = sample.get("ts")
         if not isinstance(ts, (int, float)) or isinstance(ts, bool) or not time.time() - 10 <= ts <= time.time() + 5:
             raise ValueError("Expected a current native sample.")
+        if not settings['desktop_context_enabled']:
+            sample = {k: v for k, v in sample.items() if k not in (
+                'context_snapshot', 'call_session', 'call_active', 'call_verified_at', 'call_proof',
+                'desktop_context', 'context_scope')}
         if self.tracker.ingest(sample):
             self.native_last_sample = time.time()
             self.sample_count += 1
