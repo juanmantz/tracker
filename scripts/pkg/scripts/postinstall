@@ -31,8 +31,29 @@ if [[ -d "$INSTALL_OLD" ]]; then
   INSTALL_IDENTIFIER="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$INSTALL_OLD/Contents/Info.plist" 2>/dev/null || true)"
   if [[ "$INSTALL_IDENTIFIER" == local.dreamstime.companion ]]; then /bin/rm -rf "$INSTALL_OLD"; fi
 fi
-# Activate recovery now, without requiring the user to log out.
+# Retire the previous GUI as well as its launchd job. An old GUI can otherwise
+# survive the file replacement and reopen the new service in legacy mode.
 /bin/launchctl bootout "gui/$INSTALL_UID/local.dreamstime.start" 2>/dev/null || true
+for INSTALL_PID in $(/usr/bin/pgrep -u "$INSTALL_UID" -x DreamsTime || true); do
+  INSTALL_EXECUTABLE="$(/bin/ps -ww -p "$INSTALL_PID" -o comm= || true)"
+  if [[ "$INSTALL_EXECUTABLE" == '/Applications/Dreams Time.app/Contents/MacOS/DreamsTime' || "$INSTALL_EXECUTABLE" == "$INSTALL_HOME/Applications/Dreams Time.app/Contents/MacOS/DreamsTime" ]]; then
+    /bin/kill -TERM "$INSTALL_PID" 2>/dev/null || true
+  fi
+done
+# Stop the old backend through its own authenticated restart endpoint so its
+# database and queued sync requests close cleanly. No account data is replaced.
+if [[ -f "$INSTALL_DATA/pairing-token" ]]; then
+  INSTALL_PAIRING="$(cat "$INSTALL_DATA/pairing-token")"
+  /usr/bin/curl --noproxy '*' --silent --max-time 4 -o /dev/null \
+    -H "Authorization: Bearer $INSTALL_PAIRING" -H 'Content-Type: application/json' \
+    -d '{"restart":true}' http://127.0.0.1:43123/api/quit || true
+  unset INSTALL_PAIRING
+  for INSTALL_ATTEMPT in {1..120}; do
+    if ! /usr/bin/curl --noproxy '*' --silent --max-time 1 http://127.0.0.1:43123/health >/dev/null; then break; fi
+    sleep 0.25
+  done
+fi
+# Activate the new app-owned collector without requiring a logout or manual quit.
 /bin/launchctl bootstrap "gui/$INSTALL_UID" "$INSTALL_AGENT" || true
 /bin/launchctl asuser "$INSTALL_UID" /usr/bin/sudo -u "$INSTALL_USER" /usr/bin/open '/Applications/Dreams Time.app' || true
 exit 0

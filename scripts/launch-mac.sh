@@ -30,7 +30,10 @@ fail() {
 }
 trap 'fail "Setup did not finish. Reopen Dreams Time to retry. The setup log is in Library/Application Support/Dreams Time/launcher.log."' ERR
 
-APP_VERSION="0.8.0"
+APP_VERSION="0.8.1"
+# Installed launches always use the app-owned collector, including a reopen
+# request delivered to an older GUI executable during an upgrade.
+if [[ "${DREAMSTIME_INSTALLED:-0}" == 1 ]]; then export DREAMSTIME_NATIVE_HOST=1; fi
 open_window() {
   if [[ "${DREAMSTIME_HEADLESS:-0}" != 1 ]]; then
     "$MAC_OPEN" "http://127.0.0.1:$APP_PORT/?welcome=1"
@@ -40,7 +43,7 @@ open_window() {
 # Previously reopening the new download just reopened the older process forever.
 APP_HEALTH="$(/usr/bin/curl --noproxy '*' --silent --max-time 2 "http://127.0.0.1:$APP_PORT/health" || true)"
 if [[ "$APP_HEALTH" == *'"app": "dreams-time"'* ]]; then
-  if [[ "$APP_HEALTH" == *"\"version\": \"$APP_VERSION\""* ]]; then
+  if [[ "$APP_HEALTH" == *"\"version\": \"$APP_VERSION\""* ]] && { [[ "${DREAMSTIME_NATIVE_HOST:-0}" != 1 ]] || [[ "$APP_HEALTH" == *'"capture_host": "app"'* ]]; }; then
     open_window
     exit 0
   fi

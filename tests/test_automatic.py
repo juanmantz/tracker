@@ -41,6 +41,21 @@ class AutomaticTests(unittest.TestCase):
     def tick(self, offset):
         self.app.sync.automatic_tick(BASE + offset)
 
+    def test_collector_change_publishes_without_waiting_fifteen_minutes(self):
+        self.connect()
+        self.tick(0)
+        first = self.app.tracker.setting('last_heartbeat')
+        self.app.tracker.health.update(sensor='connected', accessibility=True,
+            collector={'collector_bundle':'local.dreamstime.companion','collector_pid':123,'ax_trusted':True})
+        self.tick(60)
+        self.assertEqual(self.app.tracker.setting('last_heartbeat'), BASE+60)
+        self.assertGreater(self.app.tracker.setting('last_heartbeat'), first)
+        report = next(json.loads(n['fields']['notes']) for n in self.provider.map['nodes']
+                      if n.get('kind')=='note' and json.loads(n['fields'].get('notes','{}')).get('schema')==REVIEW_SCHEMA)
+        self.assertEqual(report['sensor']['collector']['collector_bundle'],'local.dreamstime.companion')
+        self.tick(120)
+        self.assertEqual(self.app.tracker.setting('last_heartbeat'), BASE+60)
+
     def test_unattended_eight_hour_day_project_changes_idle_offline_and_daily_correction(self):
         self.connect()
         self.control(focus={'project': 'atlas', 'at': BASE})

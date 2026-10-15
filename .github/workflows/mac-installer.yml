@@ -42,7 +42,7 @@ jobs:
           python3 - <<'PY'
           import json
           h=json.load(open('artifacts/native-release/health.json'))
-          assert h['app']=='dreams-time' and h['version']=='0.8.0'
+          assert h['app']=='dreams-time' and h['version']=='0.8.1' and h['capture_host']=='app'
           s=json.load(open('artifacts/native-release/native-sample.json'))
           assert isinstance(s['app'],str) and s['idle']>=0 and isinstance(s['accessibility'],bool)
           import time, urllib.request
@@ -73,7 +73,7 @@ jobs:
         run: python3 tests/mac_ax_capture_check.py
       - uses: actions/upload-artifact@v4
         with:
-          name: Dreams-Time-0.8.0-Update
+          name: Dreams-Time-0.8.1-Update
           path: artifacts/native-release/Dreams-Time-Update.pkg
           compression-level: 0
       - name: Split download into manageable artifacts
@@ -116,9 +116,9 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          Path("artifacts/native-release/release-notes.txt").write_text("Dreams Time 0.8.0 runs native activity collection inside the authorized app process. Fixes the separate collector permission mismatch and adds explicit window-read diagnostics.\n\nExisting installations: use Dreams-Time-Update.pkg. Recorded activity, pairing and private runtimes are preserved. New installations: use Dreams-Time-Installer.pkg.\n")
+          Path("artifacts/native-release/release-notes.txt").write_text("Dreams Time 0.8.1 retires surviving legacy GUI/backend processes during installation and enforces app-owned native collection. Collector diagnostics publish promptly after changes.\n\nExisting installations: use Dreams-Time-Update.pkg. Recorded activity, pairing and private runtimes are preserved. New installations: use Dreams-Time-Installer.pkg.\n")
           PY
-          if ! gh release view v0.8.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create v0.8.0 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dreams Time 0.8.0" --notes-file artifacts/native-release/release-notes.txt
+          if ! gh release view v0.8.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create v0.8.1 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dreams Time 0.8.1" --notes-file artifacts/native-release/release-notes.txt
           fi
-          gh release upload v0.8.0 --repo "$GITHUB_REPOSITORY" artifacts/native-release/Dreams-Time-Update.pkg artifacts/native-release/Dreams-Time-Installer.pkg --clobber
+          gh release upload v0.8.1 --repo "$GITHUB_REPOSITORY" artifacts/native-release/Dreams-Time-Update.pkg artifacts/native-release/Dreams-Time-Installer.pkg --clobber

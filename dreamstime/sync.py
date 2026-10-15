@@ -4,6 +4,7 @@ import time
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
+from . import __version__
 from .connection import Conflict, Rejected
 from .core import digest, monday, week_bounds
 from .dreams import build_worked_batch
@@ -168,8 +169,14 @@ class DreamsSync:
                     self.tracker.set_setting('auto_dirty', False)
                 self.tracker.set_setting('sync_error', None)
                 self.tracker.set_setting('auto_error_since', None)
-                if now - self.tracker.setting('last_heartbeat', 0) >= 900:
-                    self.coordination.publish(self.refresh(), now)
+                collector = self.tracker.health.get('collector', {})
+                profile = digest([__version__, collector.get('collector_bundle'),
+                                  collector.get('collector_pid'), collector.get('ax_trusted'),
+                                  bool(self.tracker.health.get('accessibility'))])
+                if (now - self.tracker.setting('last_heartbeat', 0) >= 900
+                        or profile != self.tracker.setting('published_collector_profile')):
+                    if self.coordination.publish(self.refresh(), now) is not False:
+                        self.tracker.set_setting('published_collector_profile', profile)
             except (ValueError, OSError) as error:
                 self.tracker.set_setting('sync_error', str(error))
                 if not self.tracker.setting('auto_error_since'):

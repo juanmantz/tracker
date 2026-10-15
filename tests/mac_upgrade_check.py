@@ -44,15 +44,48 @@ def prepare():
         try:
             with urlopen('http://127.0.0.1:43123/health', timeout=1) as response:
                 assert json.load(response)['version'] == '0.6.0'
+            start_legacy_gui()
             return
         except OSError:
             time.sleep(.1)
     raise AssertionError('Prior service did not start')
 
 
+def start_legacy_gui():
+    # Keep an older GUI alive at the exact installed path. A source-only prior
+    # backend fixture cannot catch the process-retirement bug seen on a real Mac.
+    import plistlib
+    binary_dir = EVIDENCE/'legacy-gui'
+    binary_dir.mkdir(exist_ok=True)
+    source = binary_dir/'LegacyGUI.swift'
+    source.write_text('''import AppKit
+let app=NSApplication.shared
+app.setActivationPolicy(.accessory)
+app.run()
+''')
+    executable=binary_dir/'DreamsTime'
+    subprocess.run(['/usr/bin/xcrun','swiftc',str(source),'-o',str(executable)],check=True)
+    app_path=Path('/Applications/Dreams Time.app')
+    subprocess.run(['sudo','mkdir','-p',str(app_path/'Contents/MacOS')],check=True)
+    info=binary_dir/'Info.plist'
+    info.write_bytes(plistlib.dumps({'CFBundleIdentifier':'local.dreamstime.companion',
+        'CFBundleExecutable':'DreamsTime','CFBundlePackageType':'APPL','CFBundleName':'Dreams Time',
+        'CFBundleShortVersionString':'0.7.0','CFBundleVersion':'8'}))
+    subprocess.run(['sudo','cp',str(info),str(app_path/'Contents/Info.plist')],check=True)
+    subprocess.run(['sudo','cp',str(executable),str(app_path/'Contents/MacOS/DreamsTime')],check=True)
+    subprocess.run(['sudo','/usr/bin/codesign','--force','--sign','-',str(app_path)],check=True)
+    process=subprocess.Popen([str(app_path/'Contents/MacOS/DreamsTime')],start_new_session=True)
+    time.sleep(1)
+    assert process.poll() is None
+    (EVIDENCE/'legacy-gui-pid').write_text(str(process.pid))
+
+
 def verify():
     from dreamstime.core import Tracker
     before = json.loads((EVIDENCE / 'upgrade-before.json').read_text())
+    pid=int((EVIDENCE/'legacy-gui-pid').read_text())
+    found=subprocess.run(['/bin/ps','-p',str(pid),'-o','stat='],capture_output=True,text=True)
+    assert found.returncode != 0 or found.stdout.strip().startswith('Z'), 'The previous GUI survived installation'
     tracker = Tracker(SUPPORT / 'activity.sqlite')
     assert tracker.report('2026-10-05')['total_seconds'] == 120
     assert fingerprint(tracker.setting('installation')) == before['installation']
@@ -61,7 +94,7 @@ def verify():
     assert fingerprint(token) == before['pairing']
     (EVIDENCE / 'upgrade-check.json').write_text(json.dumps({
         'prior_history_seconds': 120, 'preserved_history_seconds': 120,
-        'pairing_preserved': True, 'installation_preserved': True}))
+        'pairing_preserved': True, 'installation_preserved': True, 'legacy_gui_retired': True}))
 
     # Drive the installed application's exact failing button through the live
     # public provider. Only registers a public PKCE client; no account sign-in,

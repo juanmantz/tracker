@@ -1,2 +1,2 @@
 """Dreams Time: local activity, explicit attribution, deterministic replay."""
-__version__ = "0.8.0"
+__version__ = "0.8.1"

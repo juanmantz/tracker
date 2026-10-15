@@ -260,7 +260,7 @@ def handler_for(app):
                 return self.send(403, {"error": "Invalid host"})
             path = urlsplit(self.path).path
             if path == "/health":
-                return self.send(200, {"app": "dreams-time", "ready": True, "version": __version__})
+                return self.send(200, {"app": "dreams-time", "ready": True, "version": __version__, "capture_host": "app" if app.native_host else "standalone"})
             if path == "/oauth/callback":
                 try:
                     app.connection.finish(parse_qs(urlsplit(self.path).query))
