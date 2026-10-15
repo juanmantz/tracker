@@ -77,7 +77,14 @@ db.commit()
     subprocess.run(['sudo',python,str(grant_script),'/Library/Application Support/com.apple.TCC/TCC.db',str(csreq)],check=True)
     subprocess.run(['sudo','/usr/bin/killall','tccd'],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     # Launch via LaunchServices, with the actual app identity used by customers.
-    subprocess.run(['/usr/bin/open','-g',str(APP)],check=True)
+    # Intentional SIGKILL can leave a stale LaunchServices registration briefly.
+    # Request a fresh instance and retry that transient launch error.
+    for attempt in range(20):
+        opened=subprocess.run(['/usr/bin/open','-n','-g',str(APP)],capture_output=True,text=True)
+        if opened.returncode==0: break
+        time.sleep(.5)
+    else:
+        raise AssertionError('LaunchServices did not reopen the installed app: '+opened.stderr)
     trusted=wait_for(lambda:api('/api/diagnostics')['health'].get('collector',{}).get('ax_trusted'),45)
 
     fixture=temporary/'WindowFixture.swift'
