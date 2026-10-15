@@ -24,7 +24,7 @@ with open(sys.argv[1], 'wb') as f:
     plistlib.dump([{'BundleIsRelocatable':False,'BundleHasStrictIdentifier':True,'BundleIsVersionChecked':True,'RootRelativeBundlePath':'Applications/Dreams Time.app','BundleOverwriteAction':'upgrade'}], f)
 PY
 chmod +x "$BUILD_ROOT/scripts/pkg/scripts/postinstall"
-/usr/bin/pkgbuild --root "$BUILD_OUTPUT/stage" --identifier local.dreamstime.pkg --version 0.9.0 --install-location / \
+/usr/bin/pkgbuild --root "$BUILD_OUTPUT/stage" --identifier local.dreamstime.pkg --version 0.9.1 --install-location / \
   --component-plist "$BUILD_OUTPUT/components.plist" --scripts "$BUILD_ROOT/scripts/pkg/scripts" \
   "$BUILD_OUTPUT/components/DreamsTime.pkg"
 /usr/bin/productbuild --distribution "$BUILD_ROOT/scripts/pkg/Distribution.xml" --resources "$BUILD_ROOT/scripts/pkg/resources" \
@@ -41,6 +41,6 @@ mkdir -p "$UPDATE_STAGE/Applications"
 rm -rf "$UPDATE_STAGE/Applications/Dreams Time.app/Contents/Resources/runtime"
 /usr/bin/codesign --force --deep --sign - --identifier local.dreamstime.companion "$UPDATE_STAGE/Applications/Dreams Time.app"
 /usr/bin/codesign --verify --deep --strict "$UPDATE_STAGE/Applications/Dreams Time.app"
-/usr/bin/pkgbuild --root "$UPDATE_STAGE" --identifier local.dreamstime.pkg --version 0.9.0 --install-location / \
+/usr/bin/pkgbuild --root "$UPDATE_STAGE" --identifier local.dreamstime.pkg --version 0.9.1 --install-location / \
   --component-plist "$BUILD_OUTPUT/components.plist" --scripts "$BUILD_ROOT/scripts/pkg/scripts" \
   "$BUILD_OUTPUT/Dreams-Time-Update.pkg"
