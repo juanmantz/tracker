@@ -3,6 +3,7 @@ import hashlib
 import json
 import os
 import plistlib
+import signal
 import subprocess
 import sys
 import tempfile
@@ -66,12 +67,25 @@ try png.write(to:URL(fileURLWithPath:CommandLine.arguments[2]))
     after_pids=set(subprocess.run(['/usr/bin/pgrep','-x','DreamsTime'],capture_output=True,text=True,check=True).stdout.split())
     assert after_pids==before_pids,'Icon installation restarted or created an app process'
     assert str(api('/api/diagnostics')['health']['collector']['collector_pid']) in before_pids
-    flags=int.from_bytes(os.getxattr(APP,'com.apple.FinderInfo')[8:10],'big')
+    finder_info=bytes.fromhex(subprocess.run(['/usr/bin/xattr','-px','com.apple.FinderInfo',str(APP)],capture_output=True,text=True,check=True).stdout)
+    flags=int.from_bytes(finder_info[8:10],'big')
     assert flags&0x0400,'macOS did not register a custom application icon'
     def changed():
         subprocess.run([str(binary),str(APP),str(OUT/'after.png')],check=True)
         return fingerprint(OUT/'after.png')!=fingerprint(OUT/'before.png')
     wait_for(changed)
+    # Also prove authorization survives a later normal application restart.
+    subprocess.run(['/bin/launchctl','bootout','gui/'+str(os.getuid())+'/local.dreamstime.start'],capture_output=True)
+    for pid in after_pids:
+        try:os.kill(int(pid),signal.SIGTERM)
+        except ProcessLookupError:pass
+    time.sleep(1)
+    for attempt in range(20):
+        launched=subprocess.run(['/usr/bin/open','-n','-g',str(APP)],capture_output=True,text=True)
+        if launched.returncode==0:break
+        time.sleep(.5)
+    else:raise AssertionError(launched.stderr)
+    wait_for(lambda:str(api('/api/diagnostics')['health']['collector']['collector_pid']) not in before_pids and api('/api/diagnostics')['health']['collector']['ax_trusted'])
     # Ensure the normal app packager includes the same icon for future builds.
     subprocess.run([sys.executable,'scripts/package-mac.py','--update-only',
                     '--native-binary',str(APP/'Contents/MacOS/DreamsTime'),
@@ -83,6 +97,6 @@ try png.write(to:URL(fileURLWithPath:CommandLine.arguments[2]))
     proof={'finder_icon_changed':True,'application_signature_unchanged':True,'signed_app_contents_unchanged':True,
            'executable_unchanged':True,'info_plist_unchanged':True,'pairing_preserved':True,
            'working_accessibility_grant_preserved':True,'collector_not_restarted':True,
-           'second_install_safe':True,'future_app_bundle_icon_included':True}
+           'second_install_safe':True,'accessibility_preserved_after_normal_reopen':True,'future_app_bundle_icon_included':True}
     (OUT/'icon-check.json').write_text(json.dumps(proof))
     print(json.dumps(proof))
