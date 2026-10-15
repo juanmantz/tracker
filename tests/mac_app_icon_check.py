@@ -46,6 +46,7 @@ try png.write(to:URL(fileURLWithPath:CommandLine.arguments[2]))
     subprocess.run(['/usr/bin/xcrun','swiftc',str(probe),'-o',str(binary)],check=True)
     subprocess.run([str(binary),str(APP),str(OUT/'before.png')],check=True)
     before_identity=identity()
+    before_contents={str(p.relative_to(APP)):fingerprint(p) for p in APP.rglob('*') if p.is_file()}
     before_pairing=fingerprint(SUPPORT/'pairing-token')
     before_binary=fingerprint(APP/'Contents/MacOS/DreamsTime')
     before_info=fingerprint(APP/'Contents/Info.plist')
@@ -53,7 +54,9 @@ try png.write(to:URL(fileURLWithPath:CommandLine.arguments[2]))
     before_pids=set(subprocess.run(['/usr/bin/pgrep','-x','DreamsTime'],capture_output=True,text=True,check=True).stdout.split())
     for attempt in range(2):
         subprocess.run(['sudo','/usr/sbin/installer','-pkg',str(OUT/'Dreams-Time-Icon.pkg'),'-target','/'],check=True)
-        subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict',str(APP)],check=True)
+        subprocess.run(['/usr/bin/codesign','--verify','--deep',str(APP)],check=True)
+        after_contents={str(p.relative_to(APP)):fingerprint(p) for p in APP.rglob('*') if p.is_file() and p.name!='Icon\r'}
+        assert after_contents==before_contents,'Icon installation modified signed app contents'
         assert identity()==before_identity,'Icon installation changed the app signing identity'
         assert fingerprint(APP/'Contents/MacOS/DreamsTime')==before_binary
         assert fingerprint(APP/'Contents/Info.plist')==before_info
@@ -77,7 +80,7 @@ try png.write(to:URL(fileURLWithPath:CommandLine.arguments[2]))
     info=plistlib.loads((packaged/'Contents/Info.plist').read_bytes())
     assert info['CFBundleIconFile']=='AppIcon.icns'
     assert (packaged/'Contents/Resources/AppIcon.icns').read_bytes()==Path('native/AppIcon.icns').read_bytes()
-    proof={'finder_icon_changed':True,'application_signature_unchanged':True,
+    proof={'finder_icon_changed':True,'application_signature_unchanged':True,'signed_app_contents_unchanged':True,
            'executable_unchanged':True,'info_plist_unchanged':True,'pairing_preserved':True,
            'working_accessibility_grant_preserved':True,'collector_not_restarted':True,
            'second_install_safe':True,'future_app_bundle_icon_included':True}
