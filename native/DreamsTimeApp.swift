@@ -261,7 +261,12 @@ struct DreamsTimeMain {
         let path = support.appendingPathComponent(".native-instance.lock").path
         let descriptor = Darwin.open(path, O_CREAT | O_RDWR, mode_t(0o600))
         guard descriptor >= 0 else { return false }
-        guard Darwin.flock(descriptor, LOCK_EX | LOCK_NB) == 0 else {
+        var recordLock = Darwin.flock()
+        recordLock.l_type = Int16(F_WRLCK)
+        recordLock.l_whence = Int16(SEEK_SET)
+        recordLock.l_start = 0
+        recordLock.l_len = 0
+        guard Darwin.fcntl(descriptor, F_SETLK, &recordLock) == 0 else {
             Darwin.close(descriptor)
             if !CommandLine.arguments.contains("--background") {
                 DistributedNotificationCenter.default().postNotificationName(

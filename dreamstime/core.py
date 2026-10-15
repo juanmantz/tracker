@@ -11,7 +11,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 from .recognition import recognize, WORK_KINDS, normalize, GENERIC
-from .context_snapshots import ContextSnapshots, verified_call
+from .context_snapshots import ContextSnapshots, verified_call, CALL_APPS
 
 BROWSERS = {"com.google.Chrome", "com.google.Chrome.beta", "com.microsoft.edgemac", "com.brave.Browser", "company.thebrowser.Browser", "com.apple.Safari", "org.mozilla.firefox"}
 BROWSER_FAMILIES = {"com.google.Chrome": "chrome", "com.google.Chrome.beta": "chrome", "com.microsoft.edgemac": "edge", "com.brave.Browser": "brave", "company.thebrowser.Browser": "arc"}
@@ -80,12 +80,15 @@ def context_key(context):
 
 
 def rememberable(context):
-    if context.get('excluded') or context.get('activity_kind') == 'call':
+    if (context.get('excluded') or context.get('activity_kind') == 'call'
+            or (context.get('app') in CALL_APPS and re.search(r'\b(call|meeting|huddle)\b', context.get('title', ''), re.I))):
         return False
     if context.get('identity'):
         return True
     if context.get('app') in ('com.openai.chat', 'com.openai.chatgpt', 'com.openai.codex'):
         return False  # Repeated generic desktop chat titles are not conversation IDs.
+    if normalize(context.get('title', '')) == normalize(context.get('app_name', '')):
+        return False
     meaningful = set(normalize(context.get('title', '')).split()) - GENERIC - {'untitled', 'draft', 'new', 'window'}
     return bool(meaningful)
 
@@ -325,7 +328,10 @@ class Tracker:
         app = sample.get("app", "")[:200]
         title = sample.get("title", "")[:500]
         context = {"app": app, "app_name": sample.get("app_name", app)[:200], "title": title, "url": "", "identity": "", "source": "window", "excluded": app in EXCLUDED_APPS or not app}
-        if app not in BROWSERS and not context["excluded"]:
+        if self.desktop_context and (sample.get('locked') or sample['ts'] - self.desktop_context['at'] > 12 or
+                any(self.desktop_context.get(k, '') != context.get(k, '') for k in ('app', 'title'))):
+            self.desktop_context = None
+        if app not in BROWSERS and not context["excluded"] and not sample.get('locked'):
             document, ident = document_identity(sample.get("document", ""))
             context.update(document=document, identity=ident)
             if document.startswith("http"):

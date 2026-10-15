@@ -1,4 +1,4 @@
-// macOS foreground and connected-call sensor. Captures only compact UI metadata.
+// macOS context snapshots and connected-call sensor; visible conversation matching is local.
 // Never captures screenshots, editable chat content, keystrokes or call audio.
 import AppKit
 import ApplicationServices
@@ -143,6 +143,64 @@ func startNativeActivitySensor(requestPermission: Bool = false,
         return foreground.count == 1 ? foreground[0] : nil
     }
 
+    var lastConversationAt = 0.0
+    // Only promote text from an explicitly identified conversation/main region.
+    // A whole-window scan may contain unrelated chats in the sidebar.
+    func conversationPane(_ root: AXUIElement) -> AXUIElement? {
+        var queue: [AXUIElement] = [root]
+        let deadline = Date().timeIntervalSince1970 + 0.15
+        var visited = 0
+        while !queue.isEmpty && visited < 80 && Date().timeIntervalSince1970 < deadline {
+            let node = queue.removeFirst()
+            visited += 1
+            AXUIElementSetMessagingTimeout(node, 0.04)
+            var roleValue: CFTypeRef?
+            _ = AXUIElementCopyAttributeValue(node, kAXRoleAttribute as CFString, &roleValue)
+            let role = roleValue as? String ?? ""
+            if ["AXTextField", "AXTextArea", "AXSecureTextField", "AXComboBox", "AXOutline", "AXToolbar"].contains(role) { continue }
+            var subrole: CFTypeRef?
+            _ = AXUIElementCopyAttributeValue(node, kAXSubroleAttribute as CFString, &subrole)
+            if subrole as? String == "AXLandmarkMain" { return node }
+            var description: CFTypeRef?
+            _ = AXUIElementCopyAttributeValue(node, kAXDescriptionAttribute as CFString, &description)
+            if ["AXScrollArea", "AXGroup"].contains(role),
+               ["conversation", "chat messages", "main content"].contains((description as? String ?? "").lowercased()) { return node }
+            var children: CFTypeRef?
+            _ = AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &children)
+            if let elements = children as? [AXUIElement] { queue.append(contentsOf: elements.prefix(30)) }
+        }
+        return nil
+    }
+    func visibleText(_ root: AXUIElement) -> String {
+        var queue: [(AXUIElement, Int)] = [(root, 0)]
+        var output: [String] = []
+        let deadline = Date().timeIntervalSince1970 + 0.3
+        var visited = 0
+        while !queue.isEmpty && visited < 160 && Date().timeIntervalSince1970 < deadline {
+            let (node, depth) = queue.removeFirst()
+            visited += 1
+            AXUIElementSetMessagingTimeout(node, 0.08)
+            var roleValue: CFTypeRef?
+            _ = AXUIElementCopyAttributeValue(node, kAXRoleAttribute as CFString, &roleValue)
+            let role = roleValue as? String ?? ""
+            // Do not traverse editable controls: drafts never become context.
+            if ["AXTextField", "AXTextArea", "AXSecureTextField", "AXComboBox", "AXOutline", "AXToolbar"].contains(role) { continue }
+            if role == "AXStaticText" {
+                var value: CFTypeRef?
+                _ = AXUIElementCopyAttributeValue(node, kAXValueAttribute as CFString, &value)
+                if let text = value as? String, !text.isEmpty { output.append(String(text.prefix(1000))) }
+            }
+            if depth < 8 {
+                var children: CFTypeRef?
+                _ = AXUIElementCopyAttributeValue(node, kAXChildrenAttribute as CFString, &children)
+                if let elements = children as? [AXUIElement] {
+                    queue.append(contentsOf: elements.prefix(40).map { ($0, depth + 1) })
+                }
+            }
+        }
+        return String(output.joined(separator: "\n").prefix(8000))
+    }
+
     func emit() {
         if !enabled() { receive(["heartbeat": true]); return }
         let foreground = NSWorkspace.shared.frontmostApplication
@@ -206,6 +264,15 @@ func startNativeActivitySensor(requestPermission: Bool = false,
         let mouseIdle = mouseTypes.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? idle
         let keyboardIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
         let now = Date().timeIntervalSince1970
+        var conversationText = ""
+        if !locked && idle < 120 && callID == nil && contextEnabled() &&
+            chatApps.contains(bundle) && now - lastConversationAt >= 10,
+            let window = focusedWindow, let pane = conversationPane(window) {
+            // Compare only the current conversation locally. The backend retains
+            // project-ID hints; it never stores or uploads this text.
+            conversationText = visibleText(pane)
+            lastConversationAt = now
+        }
         var event: [String: Any] = ["ts": now, "mono": ProcessInfo.processInfo.systemUptime,
             "app": bundle, "app_name": appName, "title": title, "document": document,
             "idle": idle, "mouse_idle": mouseIdle.isFinite ? mouseIdle : idle,
@@ -213,6 +280,10 @@ func startNativeActivitySensor(requestPermission: Bool = false,
             "accessibility": trusted || windowAccessStatus == "readable", "ax_trusted": trusted,
             "window_access_status": windowAccessStatus, "collector_bundle": Bundle.main.bundleIdentifier ?? "standalone",
             "collector_pid": ProcessInfo.processInfo.processIdentifier]
+        if !conversationText.isEmpty {
+            event["desktop_context"] = conversationText
+            event["context_scope"] = "conversation"
+        }
         if let snapshot = snapshot { event["context_snapshot"] = snapshot }
         if let callID = callID {
             event["call_active"] = true

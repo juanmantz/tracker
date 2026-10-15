@@ -175,3 +175,8 @@ The Mac applies a changed owner policy once. An unchanged remote policy does not
 undo a subsequent local opt-out. Other control keys and the whole-hour publishing
 policy are preserved exactly. Context evidence does not create Worked records:
 the Mac continues replacing its own stable per-project/week measured totals.
+
+Visible conversation text, when enabled, is compared locally with existing project
+names. Only project-ID hints persist. Its in-memory text cache expires within
+12 seconds of a new sample and clears on app changes, lock, Pause or opt-out.
+No conversation body is saved in a compact snapshot or device review record.
