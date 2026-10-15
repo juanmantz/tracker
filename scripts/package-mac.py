@@ -35,11 +35,16 @@ shutil.copyfile(args.native_binary or ROOT / 'scripts' / 'launch-mac.sh', execut
 if args.native_binary:
     shutil.copyfile(ROOT / 'scripts' / 'launch-mac.sh', RESOURCES / 'launch-mac.sh')
 executable.chmod(0o755)
+icon_source = ROOT / 'native' / 'AppIcon.icns'
+if icon_source.exists():
+    shutil.copyfile(icon_source, RESOURCES / 'AppIcon.icns')
 info = {'CFBundleName':'Dreams Time', 'CFBundleDisplayName':'Dreams Time', 'CFBundleIdentifier':'local.dreamstime.companion',
         'CFBundleExecutable':'DreamsTime', 'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':'0.8.1',
         'CFBundleVersion':'10', 'LSUIElement':not bool(args.native_binary), 'LSMinimumSystemVersion':'12.0', 'NSHighResolutionCapable':True,
         'NSAccessibilityUsageDescription':'Dreams Time reads the active document name to identify the project you are working on.',
         'NSAppTransportSecurity':{'NSAllowsLocalNetworking':True}}
+if icon_source.exists():
+    info['CFBundleIconFile'] = 'AppIcon.icns'
 (APP / 'Contents' / 'Info.plist').write_bytes(plistlib.dumps(info))
 (APP / 'Contents' / 'PkgInfo').write_bytes(b'APPL????')
 # All distributable app resources readable; entry point executable after Finder extraction.
