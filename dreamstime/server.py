@@ -57,6 +57,8 @@ class App:
         self.installation = self.tracker.setting("installation") or secrets.token_hex(12)
         self.tracker.set_setting("installation", self.installation)
         self.port = port
+        self.native_host = os.environ.get("DREAMSTIME_NATIVE_HOST") == "1"
+        self.native_last_sample = None
         self.sensor = None
         self.sensor_error = None
         self.demo = None
@@ -76,6 +78,8 @@ class App:
 
     def watchdog_tick(self, now=None):
         now = time.time() if now is None else now
+        if self.native_host:
+            return  # The app owns collection and restarts a failed service.
         if (platform.system() != 'Darwin' or self.tracker.paused or self.sensor_stopped_intentionally
                 or not self.tracker.setting('capture_enabled', False) or self.watchdog_stop.is_set()):
             return
@@ -97,6 +101,12 @@ class App:
 
     def start_sensor(self):
         if self.tracker.paused:
+            return
+        if self.native_host:
+            self.sensor_error = None
+            self.sensor_started_at = time.time()
+            self.sensor_stopped_intentionally = False
+            self.tracker.set_setting("capture_enabled", True)
             return
         if platform.system() != "Darwin":
             self.sensor_error = "Native capture requires macOS. Test lab works on this computer."
@@ -169,9 +179,28 @@ class App:
                 process.kill()
                 process.wait(timeout=1)
 
+    def accept_native_sample(self, sample):
+        if not self.native_host:
+            raise ValueError("This service does not use the app-hosted collector.")
+        settings = {"ok": True, "paused": self.tracker.paused,
+                    "desktop_context_enabled": bool(self.tracker.setting("desktop_context_enabled", False))}
+        if self.tracker.paused or sample.get("heartbeat") is True:
+            return settings
+        if sample.get("collector_bundle") != "local.dreamstime.companion":
+            raise ValueError("Expected the Dreams Time app collector.")
+        ts = sample.get("ts")
+        if not isinstance(ts, (int, float)) or isinstance(ts, bool) or not time.time() - 10 <= ts <= time.time() + 5:
+            raise ValueError("Expected a current native sample.")
+        if self.tracker.ingest(sample):
+            self.native_last_sample = time.time()
+            self.sample_count += 1
+            self.quickcheck.observe(sample)
+            self.sensor_error = None
+        return settings
+
     def snapshot(self, week=None):
         result = self.tracker.snapshot(time.time(), week)
-        running = bool(self.sensor and self.sensor.poll() is None)
+        running = (not self.sensor_stopped_intentionally and (self.native_last_sample is None or time.time() - self.native_last_sample < 20)) if self.native_host else bool(self.sensor and self.sensor.poll() is None)
         result['recording'] = recording_status(self.tracker, time.time(), enabled=self.tracker.setting("capture_enabled", False), running=running, error=self.sensor_error, samples=self.sample_count)
         if result['recording']['state'] == 'starting' and self.sensor_started_at and time.time() - self.sensor_started_at > 10:
             result['recording'].update(state='failed', detail='Mac capture did not return activity. Restart tracking, then check the Mac permission.')
@@ -288,6 +317,10 @@ def handler_for(app):
                 if not isinstance(data, dict):
                     raise ValueError("Expected a JSON object.")
                 path = urlsplit(self.path).path
+                if path == "/api/native/sample":
+                    if not app.native_host:
+                        return self.send(403, {"error": "App-hosted capture is not enabled."})
+                    return self.send(200, app.accept_native_sample(data))
                 if path == "/api/browser":
                     app.tracker.browser_event(data, time.time())
                     return self.send(200, {"ok": True, "paused": app.tracker.paused})

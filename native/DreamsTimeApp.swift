@@ -6,6 +6,13 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
     var window: NSWindow!
     var webView: WKWebView!
     var loading: NSTextField!
+    var background = CommandLine.arguments.contains("--background")
+    var nativeTimer: Timer?
+    var serviceStarting = false
+    var samplePending = false
+    var nativePaused = false
+    var desktopContextEnabled = false
+    var consecutiveFailures = 0
     var smokeTest = CommandLine.arguments.contains("--smoke-test")
     var home = FileManager.default.homeDirectoryForCurrentUser
     var origin = URL(string: "http://127.0.0.1:43123")!
@@ -46,7 +53,7 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
         loading.font = .systemFont(ofSize: 20)
         loading.autoresizingMask = [.width, .minYMargin, .maxYMargin]
         window.contentView!.addSubview(loading)
-        showWindow()
+        if !background { showWindow() }
         startService()
         if smokeTest {
             DispatchQueue.main.asyncAfter(deadline: .now() + 60) {
@@ -57,22 +64,71 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
     }
 
     func startService() {
+        guard !serviceStarting else { return }
+        serviceStarting = true
         DispatchQueue.global().async {
             let process = makeLauncher()
             do {
                 try process.run()
                 process.waitUntilExit()
                 DispatchQueue.main.async {
+                    self.serviceStarting = false
                     if process.terminationStatus == 0 {
+                        self.startCollection()
                         self.webView.load(URLRequest(url: self.origin))
                     } else {
                         self.startFailed()
                     }
                 }
             } catch {
-                DispatchQueue.main.async { self.startFailed() }
+                DispatchQueue.main.async { self.serviceStarting = false; self.startFailed() }
             }
         }
+    }
+
+
+    func startCollection() {
+        guard nativeTimer == nil, !smokeTest else { return }
+        // The sampler lives in this exact process and bundle, never Python or
+        // a differently signed helper. This is the identity shown in Settings.
+        nativeTimer = startNativeActivitySensor(
+            requestPermission: !background,
+            contextEnabled: { self.desktopContextEnabled },
+            enabled: { !self.nativePaused }
+        ) { sample in self.submitSample(sample) }
+    }
+
+    func submitSample(_ sample: [String: Any]) {
+        let support = home.appendingPathComponent("Library/Application Support/Dreams Time")
+        if FileManager.default.fileExists(atPath: support.appendingPathComponent(".stopped").path) {
+            NSApp.terminate(nil)
+            return
+        }
+        guard !samplePending, let token = try? String(
+            contentsOf: support.appendingPathComponent("pairing-token"), encoding: .utf8
+        ).trimmingCharacters(in: .whitespacesAndNewlines) else { return }
+        var request = URLRequest(url: origin.appendingPathComponent("api/native/sample"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 3
+        request.httpBody = try? JSONSerialization.data(withJSONObject: sample)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        samplePending = true
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                self.samplePending = false
+                if error == nil, (response as? HTTPURLResponse)?.statusCode == 200,
+                   let data = data,
+                   let settings = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+                    self.consecutiveFailures = 0
+                    self.nativePaused = settings["paused"] as? Bool ?? true
+                    self.desktopContextEnabled = settings["desktop_context_enabled"] as? Bool ?? false
+                } else {
+                    self.consecutiveFailures += 1
+                    if self.consecutiveFailures >= 2 { self.startService() }
+                }
+            }
+        }.resume()
     }
 
     func startFailed() {
@@ -167,19 +223,24 @@ func makeLauncher() -> Process {
     var environment = ProcessInfo.processInfo.environment
     environment["DREAMSTIME_APP_BUNDLE"] = Bundle.main.bundleURL.path
     environment["DREAMSTIME_HEADLESS"] = "1"
+    environment["DREAMSTIME_NATIVE_HOST"] = "1"
     environment["DREAMSTIME_INSTALLED"] = "1"
     environment["DREAMSTIME_BACKGROUND"] = CommandLine.arguments.contains("--background") ? "1" : "0"
     process.environment = environment
     return process
 }
 
-if CommandLine.arguments.contains("--background") {
-    let process = makeLauncher()
-    do { try process.run(); process.waitUntilExit(); exit(process.terminationStatus) }
-    catch { exit(1) }
+@main
+struct DreamsTimeMain {
+    static func main() {
+        if CommandLine.arguments.contains("--background") {
+            let support = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/Dreams Time/.stopped")
+            if FileManager.default.fileExists(atPath: support.path) { exit(0) }
+        }
+        let app = NSApplication.shared
+        app.setActivationPolicy(CommandLine.arguments.contains("--background") ? .accessory : .regular)
+        let delegate = DreamsTimeApp()
+        app.delegate = delegate
+        app.run()
+    }
 }
-let app = NSApplication.shared
-app.setActivationPolicy(.regular)
-let delegate = DreamsTimeApp()
-app.delegate = delegate
-app.run()

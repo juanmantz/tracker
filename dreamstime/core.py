@@ -391,6 +391,7 @@ class Tracker:
         self.previous = current
         self.current = current
         self.health.update(sensor="connected", accessibility=sample.get("accessibility", False), last_sample=ts)
+        self.health["collector"] = {k: sample[k] for k in ("collector_bundle", "collector_pid", "ax_trusted", "window_access_status") if k in sample}
         self.health['input'] = {k: round(sample[k], 1) for k in ('mouse_idle', 'keyboard_idle') if isinstance(sample.get(k), (int, float)) and math.isfinite(sample[k]) and sample[k] >= 0}
         return True
 

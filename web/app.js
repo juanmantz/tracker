@@ -115,7 +115,7 @@ function renderProjects(data,names){
   $('#sync-status').textContent=automaticStatus(d);
 }
 function renderSettings(data,names){
-  $('#accessibility-status').textContent=data.health.accessibility?'Window access is allowed. File and conversation names can be detected.':'Allow access in macOS to detect the file or conversation you are working in.';
+  $('#accessibility-status').textContent=data.health.accessibility?'Window access is allowed. File and conversation names can be detected.':'Window context is unavailable. If Dreams Time is already enabled in macOS, the collector needs to reconnect.';
   $('#desktop-optin').checked=!!data.desktop_context_enabled;
   const dreams=data.dreams||{};
   $('#dreams-status').textContent=automaticStatus(dreams);

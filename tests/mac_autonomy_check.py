@@ -38,13 +38,14 @@ def service_pid():
 
 before = api('/api/diagnostics')['recording']['sample_count']
 backend = service_pid()
-children = subprocess.check_output(['/usr/bin/pgrep', '-P', str(backend)], text=True).split()
-sensor = next(int(pid) for pid in children if 'activity-sensor' in subprocess.check_output(['/bin/ps', '-p', pid, '-o', 'comm='], text=True))
+sensor = api('/api/diagnostics')['health']['collector']['collector_pid']
+assert api('/api/diagnostics')['health']['collector']['collector_bundle'] == 'local.dreamstime.companion'
 os.kill(sensor, signal.SIGKILL)
-wait_for(lambda: api('/api/diagnostics')['recording']['process_running'] and api('/api/diagnostics')['recording']['sample_count'] > before + 2, 40)
+wait_for(lambda: api('/api/diagnostics')['health'].get('collector', {}).get('collector_pid') != sensor
+         and api('/api/diagnostics')['recording']['sample_count'] > before + 2, 100)
 subprocess.run(['/bin/launchctl', 'print', 'gui/' + str(os.getuid()) + '/local.dreamstime.start'], check=True, stdout=subprocess.DEVNULL)
 os.kill(backend, signal.SIGKILL)
-wait_for(lambda: service_pid() != backend and api('/health')['version'] == '0.7.0', 100)
+wait_for(lambda: service_pid() != backend and api('/health')['version'] == '0.8.0', 100)
 wait_for(lambda: api('/api/diagnostics')['recording']['sample_count'] >= 2, 20)
 api('/api/quit', {})
 time.sleep(2)
@@ -57,8 +58,10 @@ except OSError:
 else:
     raise AssertionError('Explicit Quit must suppress automatic relaunch')
 subprocess.run([APP, '--smoke-test'], check=True, timeout=65)
+subprocess.run(['/usr/bin/open', '-g', '/Applications/Dreams Time.app'], check=True)
+wait_for(lambda: api('/api/diagnostics')['recording']['sample_count'] >= 2, 20)
 assert not (SUPPORT / '.stopped').exists()
 assert api('/api/snapshot')['dreams']['automatic'] is True
-PROOF.write_text(json.dumps({'sensor_crash_recovered': True, 'service_crash_recovered_by_launchd': True,
+PROOF.write_text(json.dumps({'sensor_crash_recovered': True, 'service_crash_recovered_by_app': True,
                             'quit_respected': True, 'reopen_resumed': True, 'automatic_saving_default': True}))
 print('Installed app recovered from collector and service crashes; Quit and reopen worked.')

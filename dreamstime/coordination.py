@@ -107,7 +107,7 @@ class Coordination:
         ordered = sorted(rows.values(), key=lambda r: (r['project'] is not None, -r['end']))
         payload = {'schema': REVIEW_SCHEMA, 'device': self.installation, 'version': __version__, 'updated_at': now,
                 'timezone': self.tracker.timezone, 'paused': self.tracker.paused,
-                'sensor': {k: health.get(k) for k in ('sensor', 'accessibility', 'last_sample')},
+                'sensor': {k: health.get(k) for k in ('sensor', 'accessibility', 'last_sample', 'collector')},
                 'last_save': self.tracker.setting('last_sync'), 'sync_error': self.tracker.setting('sync_error'),
                 'local_review_at': self.tracker.setting('local_review_at'), 'activities': ordered[:160],
                 'omitted_groups': max(0, len(ordered) - 160)}

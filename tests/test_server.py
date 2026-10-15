@@ -74,6 +74,10 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.request("POST", "/api/projects", ["bad shape"])[0], 400)
         self.assertEqual(self.request("GET", "/api/snapshot?week=2026-10-07")[0], 400)
 
+    def test_native_samples_require_pairing_and_the_app_host_mode(self):
+        self.assertEqual(self.request("POST", "/api/native/sample", {"heartbeat":True}, token=False)[0], 401)
+        self.assertEqual(self.request("POST", "/api/native/sample", {"heartbeat":True})[0], 403)
+
     def test_diagnostics_exclude_sensitive_content(self):
         _, data = self.request("GET", "/api/diagnostics")
         body = json.loads(data)
