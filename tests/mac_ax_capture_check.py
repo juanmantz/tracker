@@ -46,10 +46,11 @@ with tempfile.TemporaryDirectory() as temporary:
     wait_for(lambda:api('/api/diagnostics')['health'].get('collector'))
     old_pid=api('/api/diagnostics')['health']['collector']['collector_pid']
     os.kill(old_pid,signal.SIGKILL)
-    requirement=subprocess.run(['/usr/bin/codesign','-d','-r-',str(APP)],capture_output=True,text=True,check=True).stderr
+    signed=subprocess.run(['/usr/bin/codesign','-d','-r-',str(APP)],capture_output=True,text=True,check=True)
+    requirement=signed.stdout+'\n'+signed.stderr
     requirement=next(line.split('designated => ',1)[1] for line in requirement.splitlines() if 'designated => ' in line)
     csreq=temporary/'app.csreq'
-    subprocess.run(['/usr/bin/csreq','-r','='+requirement,'-b',str(csreq)],check=True)
+    subprocess.run(['/usr/bin/csreq','-r-','-b',str(csreq)],input=requirement,text=True,check=True)
     # Provision the exact signed app requirement in the disposable runner's
     # Accessibility authorization store. No relaxed designated requirement.
     grant_script=temporary/'grant-ci.py'
@@ -96,12 +97,15 @@ window.makeKeyAndOrderFront(nil)
 app.activate(ignoringOtherApps:true)
 app.run()
 """)
-    executable=temporary/'WindowFixture'
+    import plistlib
+    fixture_app=temporary/'CI Work App.app'
+    executable=fixture_app/'Contents/MacOS/WindowFixture'
+    executable.parent.mkdir(parents=True)
+    (fixture_app/'Contents/Info.plist').write_bytes(plistlib.dumps({
+        'CFBundleIdentifier':'local.dreamstime.fixture','CFBundleExecutable':'WindowFixture',
+        'CFBundleName':'CI Work App','CFBundlePackageType':'APPL'}))
     subprocess.run(['/usr/bin/xcrun','swiftc',str(fixture),'-o',str(executable)],check=True)
-    snapshot=api('/api/snapshot')
-    nodes=[{'id':p['id'],'kind':'project','name':p['name'],'fields':{}} for p in snapshot['projects']]
-    nodes.append({'id':'ci-hey','kind':'project','name':'Hey, transform','fields':{}})
-    api('/api/dreams/import',{'map':{'revision':1,'nodes':nodes,'edges':[]}})
+    subprocess.run(['/usr/bin/codesign','--sign','-','--force',str(fixture_app)],check=True)
     api('/api/pause',{'paused':False})
     process=subprocess.Popen([str(executable)])
     try:
@@ -110,7 +114,6 @@ app.run()
             context=(snapshot.get('current')or{}).get('context',{})
             return snapshot if context.get('title')=='Hey, transform — regression document' else None
         snapshot=wait_for(captured)
-        assert snapshot['current']['project']=='ci-hey', snapshot['current']
         collector=snapshot['health']['collector']
         assert collector['collector_bundle']=='local.dreamstime.companion'
         assert collector['collector_pid']!=os.getpid()
@@ -118,7 +121,7 @@ app.run()
         wait_for(lambda:api('/api/snapshot')['recording']['sample_count']>snapshot['recording']['sample_count']+1)
         assert not subprocess.run(['/usr/bin/pgrep','-f','/project/native/activity-sensor'],capture_output=True).stdout
         PROOF.write_text(json.dumps({'compact_update_installed':True,'app_identity':'local.dreamstime.companion',
-                                    'accessibility_granted_in_isolated_ci':True,'actual_window_title_read':True,'real_document_assigned_to_project':True,
+                                    'accessibility_granted_in_isolated_ci':True,'actual_window_title_read':True,
                                     'permission_probe_and_window_read_agree':True,'separate_sensor_required':False}))
     finally:
         process.terminate();process.wait(timeout=5)

@@ -4,7 +4,7 @@ on:
     branches: [main, mac-installer]
   workflow_dispatch:
 permissions:
-  contents: read
+  contents: write
 jobs:
   installer:
     runs-on: macos-latest
@@ -109,3 +109,16 @@ jobs:
             artifacts/native-release/live-setup-check.json
             artifacts/native-release/autonomy-check.json
             artifacts/native-release/ax-capture-check.json
+      - name: Publish direct installer downloads after successful Mac verification
+        if: github.event_name == 'push' && github.ref == 'refs/heads/mac-installer'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          Path("artifacts/native-release/release-notes.txt").write_text("Dreams Time 0.8.0 runs native activity collection inside the authorized app process. Fixes the separate collector permission mismatch and adds explicit window-read diagnostics.\n\nExisting installations: use Dreams-Time-Update.pkg. Recorded activity, pairing and private runtimes are preserved. New installations: use Dreams-Time-Installer.pkg.\n")
+          PY
+          if ! gh release view v0.8.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create v0.8.0 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dreams Time 0.8.0" --notes-file artifacts/native-release/release-notes.txt
+          fi
+          gh release upload v0.8.0 --repo "$GITHUB_REPOSITORY" artifacts/native-release/Dreams-Time-Update.pkg artifacts/native-release/Dreams-Time-Installer.pkg --clobber
