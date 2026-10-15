@@ -39,8 +39,8 @@ icon_source = ROOT / 'native' / 'AppIcon.icns'
 if icon_source.exists():
     shutil.copyfile(icon_source, RESOURCES / 'AppIcon.icns')
 info = {'CFBundleName':'Dreams Time', 'CFBundleDisplayName':'Dreams Time', 'CFBundleIdentifier':'local.dreamstime.companion',
-        'CFBundleExecutable':'DreamsTime', 'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':'0.8.2',
-        'CFBundleVersion':'11', 'LSUIElement':not bool(args.native_binary), 'LSMinimumSystemVersion':'12.0', 'NSHighResolutionCapable':True,
+        'CFBundleExecutable':'DreamsTime', 'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':'0.9.0',
+        'CFBundleVersion':'12', 'LSUIElement':not bool(args.native_binary), 'LSMinimumSystemVersion':'12.0', 'NSHighResolutionCapable':True,
         'NSAccessibilityUsageDescription':'Dreams Time reads the active document name to identify the project you are working on.',
         'NSAppTransportSecurity':{'NSAllowsLocalNetworking':True}}
 if icon_source.exists():
@@ -78,4 +78,4 @@ with zipfile.ZipFile(OUT) as archive:
     mode = archive.getinfo('Dreams Time.app/Contents/MacOS/DreamsTime').external_attr >> 16
     assert mode & 0o111
     assert not any('activity.sqlite' in p or 'pairing-token' in p for p in archive.namelist())
-print(json.dumps({'file':str(OUT),'bytes':OUT.stat().st_size,'update_only':args.update_only,'version':'0.8.2'}))
+print(json.dumps({'file':str(OUT),'bytes':OUT.stat().st_size,'update_only':args.update_only,'version':'0.9.0'}))

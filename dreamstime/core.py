@@ -250,7 +250,7 @@ class Tracker:
         # a unique project mention. Whole-window/sidebar text remains a suggestion.
         if context.get('context_scope') == 'conversation' and len(result['candidates']) == 1:
             return {'project': result['candidates'][0]['project'], 'confidence': 'high', 'reason': 'Project in the current conversation', 'candidates': result['candidates']}
-        if at is not None and context.get('app') in FOCUS_APPS:
+        if at is not None and (context.get('app') in FOCUS_APPS or context.get('activity_kind') == 'call'):
             focus = next((f for f in reversed(self.setting('focus_history', [])) if f['at'] <= at), None)
             if focus and focus['project'] in valid:
                 return {'project': focus['project'], 'confidence': 'confirmed', 'reason': 'Current project set in ChatGPT', 'candidates': result['candidates']}
