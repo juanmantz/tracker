@@ -36,7 +36,9 @@ def wait_for(check, timeout=30):
         except (OSError,ValueError,KeyError,TypeError):
             pass
         time.sleep(.5)
-    raise AssertionError('The app did not capture the permitted fixture window')
+    try: detail=api('/api/diagnostics')
+    except (OSError,ValueError): detail={}
+    raise AssertionError('Installed capture check timed out: '+json.dumps(detail))
 
 with tempfile.TemporaryDirectory() as temporary:
     temporary=Path(temporary)
@@ -45,13 +47,6 @@ with tempfile.TemporaryDirectory() as temporary:
     subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict',str(APP)],check=True)
     wait_for(lambda:api('/api/diagnostics')['health'].get('collector'))
     old_pid=api('/api/diagnostics')['health']['collector']['collector_pid']
-    denied = api('/api/snapshot')
-    assert denied['recording']['project_detection'] == 'permission_required', denied['recording']
-    assert denied['recording']['state'] != 'recording', denied['recording']
-    # Exercise the shipped repair action against the live installed app, rather
-    # than asking the owner to delete/re-add entries or restart processes.
-    subprocess.run([str(APP/'Contents/MacOS/DreamsTime'), '--repair-access'], check=True)
-    wait_for(lambda: api('/api/diagnostics')['health'].get('collector',{}).get('permission_repair') == 'settings_open', 45)
     signed=subprocess.run(['/usr/bin/codesign','-d','-r-',str(APP)],capture_output=True,text=True,check=True)
     requirement=signed.stdout+'\n'+signed.stderr
     requirement=next(line.split('designated => ',1)[1] for line in requirement.splitlines() if 'designated => ' in line)
@@ -80,6 +75,34 @@ db.commit()
 """)
     python=os.environ.get('pythonLocation')
     python=str(Path(python)/'bin/python3') if python else subprocess.check_output(['/usr/bin/which','python3'],text=True).strip()
+    # Reproduce an enabled entry for an older code identity explicitly. Hosted
+    # runners may begin with broad app access, so absence of a fresh grant is
+    # not a valid negative test. This setup is CI-only, never shipped.
+    stale=temporary/'old-app.csreq'
+    subprocess.run(['/usr/bin/csreq','-r-','-b',str(stale)],
+        input='identifier "local.dreamstime.companion" and cdhash H"'+'00'*20+'"',
+        text=True,check=True)
+    subprocess.run(['sudo',python,str(grant_script),'/Library/Application Support/com.apple.TCC/TCC.db',str(stale)],check=True)
+    subprocess.run(['sudo','/usr/bin/killall','tccd'],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    os.kill(old_pid,signal.SIGKILL)
+    # Fixture setup only: launch a fresh background collector so no cached grant
+    # or foreground automatic repair can hide the injected stale-entry failure.
+    for attempt in range(20):
+        opened=subprocess.run(['/usr/bin/open','-n','-g',str(APP),'--args','--background'],capture_output=True,text=True)
+        if opened.returncode==0: break
+        time.sleep(.5)
+    else: raise AssertionError('LaunchServices could not start denied fixture: '+opened.stderr)
+    def denied_capture():
+        snapshot=api('/api/snapshot')
+        collector=snapshot['health'].get('collector',{})
+        return snapshot if collector.get('collector_pid') != old_pid and collector.get('ax_trusted') is False else None
+    denied=wait_for(denied_capture,45)
+    old_pid=denied['health']['collector']['collector_pid']
+    assert denied['recording']['project_detection']=='permission_required',denied['recording']
+    assert denied['recording']['state']!='recording',denied['recording']
+    # Now exercise the shipped repair action, not another fixture reset/restart.
+    subprocess.run([str(APP/'Contents/MacOS/DreamsTime'),'--repair-access'],check=True)
+    wait_for(lambda:api('/api/diagnostics')['health'].get('collector',{}).get('permission_repair')=='settings_open',45)
     subprocess.run(['sudo',python,str(grant_script),'/Library/Application Support/com.apple.TCC/TCC.db',str(csreq)],check=True)
     subprocess.run(['sudo','/usr/bin/killall','tccd'],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     # Only this disposable CI runner provisions a grant. The shipped app only
@@ -130,7 +153,7 @@ app.run()
         assert collector['window_access_status']=='readable'
         wait_for(lambda:api('/api/snapshot')['recording']['sample_count']>snapshot['recording']['sample_count']+1)
         assert not subprocess.run(['/usr/bin/pgrep','-f','/project/native/activity-sensor'],capture_output=True).stdout
-        PROOF.write_text(json.dumps({'compact_update_installed':True,'denial_not_reported_as_tracking_success':True,'repair_opened_settings':True,'collector_restarted_automatically':True,'app_identity':'local.dreamstime.companion',
+        PROOF.write_text(json.dumps({'compact_update_installed':True,'stale_enabled_entry_reproduced':True,'denial_not_reported_as_tracking_success':True,'repair_opened_settings':True,'collector_restarted_automatically':True,'app_identity':'local.dreamstime.companion',
                                     'accessibility_granted_in_isolated_ci':True,'actual_window_title_read':True,
                                     'permission_probe_and_window_read_agree':True,'separate_sensor_required':False}))
     finally:
