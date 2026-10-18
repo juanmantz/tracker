@@ -113,6 +113,15 @@ class AutomaticTests(unittest.TestCase):
         self.assertNotIn('token=secret', json.dumps(review))
         self.assertTrue(next(n for n in self.provider.map['nodes'] if note_payload(n, REVIEW_SCHEMA))['archived'])
 
+    def test_new_week_does_not_present_last_weeks_publication_as_current(self):
+        self.connect();self.samples(0,3600,title='Atlas Studio');self.tick(3600)
+        self.assertEqual(self.app.tracker.setting('publication')['published_hours'],1)
+        self.tick(7*86400+60)
+        current=self.app.tracker.setting('publication')
+        self.assertEqual(current['week'],'2026-10-12')
+        self.assertEqual(current['state'],'unassigned')
+        self.assertEqual(self.hours('atlas'),[1])
+
     def test_focus_history_splits_existing_intervals_without_reassigning_earlier_work(self):
         self.connect()
         self.samples(0, 120)

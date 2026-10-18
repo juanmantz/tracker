@@ -201,11 +201,13 @@ class DreamsSync:
                     with self.tracker.lock:
                         weeks = {monday(r[0], self.tracker.timezone) for r in self.tracker.db.execute('SELECT start FROM segments')}
                     weeks.update(self.tracker.setting('synced_weeks', {}))
+                    current_week = monday(now, self.tracker.timezone)
+                    weeks.add(current_week)
                     for week in sorted(weeks):
                         if self.stop.is_set():
                             return
                         report = self.tracker.report(week)
-                        if any(v for k,v in report['totals'].items() if k != 'unassigned') or week in self.tracker.setting('synced_weeks', {}):
+                        if week == current_week or any(v for k,v in report['totals'].items() if k != 'unassigned') or week in self.tracker.setting('synced_weeks', {}):
                             self.send(week, automatic=True)
                     self.tracker.set_setting('auto_saved_at', now)
                     self.tracker.set_setting('auto_dirty', False)

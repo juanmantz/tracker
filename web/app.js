@@ -40,7 +40,7 @@ function assignment(context,project,recommendation,segmentId){
   return controls;
 }
 const stateCopy={
-  permission_required:{title:'Project detection needs access',text:'App time is recorded, but macOS is blocking document context. Your unassigned time is kept.',action:'Repair project detection'},
+  permission_required:{title:'Project detection needs access',text:'App time is recorded, but macOS is blocking document context. Your unassigned time is kept.',action:'Pause tracking'},
   recording:{title:'Tracking is on',text:'Your active time is being saved.',action:'Pause tracking'},
   paused:{title:'Tracking is paused',text:'Your saved time is kept. Resume when you are ready.',action:'Resume tracking'},
   off:{title:'Tracking is off',text:'No new time is being recorded.',action:'Start tracking'},
@@ -157,7 +157,6 @@ async function refresh(){
 async function toggleTracking(){
   if(!snapshot||connectionLost)return refresh();busy=true;$('#tracking-toggle').disabled=true;
   try{const state=snapshot.recording?.state;
-    if(state==='permission_required'){await openPermission();return;}
     if(snapshot.paused)await api('/api/pause',{paused:false});
     else if(state==='off')await api('/api/capture/start',{});
     else if(['failed','stale'].includes(state))await api('/api/sensor/restart',{});

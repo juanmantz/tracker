@@ -285,7 +285,8 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
               url.host == "127.0.0.1", url.port == 43123,
               let body = message.body as? [String: String] else { return }
         switch body["type"] {
-        case "repair-access": repairAccess()
+        case "repair-access":
+            if AXIsProcessTrusted() { requestCurrentAppAccess() } else { repairAccess() }
         case "restart-collector": restartCollector()
         case "open-url":
             if let raw = body["url"], let url = URL(string: raw), url.scheme == "https", url.host == "dreams.checklists.workers.dev" { NSWorkspace.shared.open(url) }
