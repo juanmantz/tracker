@@ -27,6 +27,12 @@ class StatusTests(unittest.TestCase):
         self.sample(accessibility=False)
         self.assertEqual(self.status()['state'], 'recording')
 
+    def test_denied_native_permission_is_not_presented_as_successful_project_tracking(self):
+        self.sample(accessibility=False, ax_trusted=False, window_access_status='ax_error_-25211')
+        self.t.ingest({'ts':BASE+2,'app':'editor','idle':0,'accessibility':False,'ax_trusted':False})
+        self.assertEqual(self.status()['state'], 'permission_required')
+        self.assertEqual(self.status()['today_seconds'], 2)
+
     def test_browser_without_context_explains_zero_time(self):
         self.sample(app='com.google.Chrome')
         self.assertEqual(self.status()['state'], 'browser_unavailable')

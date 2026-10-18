@@ -10,6 +10,10 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
     var loading: NSTextField!
     var background = CommandLine.arguments.contains("--background")
     var permissionPrompted = false
+    var permissionRepairInProgress = false
+    var permissionSettingsSeen = false
+    var permissionRepairStarted: Double = 0
+    var collectorRestarting = false
     var nativeTimer: Timer?
     var serviceStarting = false
     var samplePending = false
@@ -104,7 +108,10 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
         ) { sample in self.submitSample(sample) }
     }
 
-    func submitSample(_ sample: [String: Any]) {
+    func submitSample(_ rawSample: [String: Any]) {
+        checkPermissionRepair()
+        var sample = rawSample
+        sample["permission_repair"] = permissionRepairInProgress ? (permissionSettingsSeen ? "settings_open" : "waiting_for_allow") : (AXIsProcessTrusted() ? "ready" : "required")
         let support = home.appendingPathComponent("Library/Application Support/Dreams Time")
         if FileManager.default.fileExists(atPath: support.appendingPathComponent(".stopped").path) {
             NSApp.terminate(nil)
@@ -150,6 +157,7 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
 
     @objc func reopenRequested(_ notification: Notification) {
         showWindow()
+        if notification.object as? String == "repair-access" { repairAccess() }
         startService()
     }
 
@@ -158,11 +166,71 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
         NSApp.setActivationPolicy(.regular)
         if !smokeTest && !permissionPrompted && !AXIsProcessTrusted() {
             permissionPrompted = true
-            let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
-            _ = AXIsProcessTrustedWithOptions(options)
+            repairAccess(automatic: true)
         }
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
+    }
+
+    func repairAccess(automatic: Bool = false) {
+        guard !smokeTest, !AXIsProcessTrusted(), !permissionRepairInProgress else { return }
+        let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "unknown"
+        let defaults = UserDefaults.standard
+        // One foreground repair per installed build. Background launches never
+        // reset a grant or open Settings, and valid access is never reset.
+        if automatic && defaults.string(forKey: "permissionRepairVersion") == version { return }
+        defaults.set(version, forKey: "permissionRepairVersion")
+        permissionRepairInProgress = true
+        permissionSettingsSeen = false
+        permissionRepairStarted = Date().timeIntervalSince1970
+        let reset = Process()
+        reset.executableURL = URL(fileURLWithPath: "/usr/bin/tccutil")
+        // Public macOS utility, scoped exclusively to this app. No TCC database
+        // edits, all-app resets, Keychain reads, or automatic permission grants.
+        reset.arguments = ["reset", "Accessibility", "local.dreamstime.companion"]
+        reset.standardOutput = FileHandle.nullDevice
+        reset.standardError = FileHandle.nullDevice
+        reset.terminationHandler = { _ in
+            DispatchQueue.main.async { self.requestCurrentAppAccess() }
+        }
+        do { try reset.run() } catch { requestCurrentAppAccess() }
+    }
+
+    func requestCurrentAppAccess() {
+        let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue() as String: true] as CFDictionary
+        _ = AXIsProcessTrustedWithOptions(options)
+        if let settings = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(settings)
+        }
+    }
+
+    func checkPermissionRepair() {
+        guard permissionRepairInProgress else { return }
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        if front == "com.apple.systempreferences" { permissionSettingsSeen = true }
+        let granted = AXIsProcessTrusted()
+        // Refresh the actual native process once when access is granted or the
+        // user leaves Settings. This also clears a cached denial. Never loop.
+        if granted || (permissionSettingsSeen && front != "com.apple.systempreferences") {
+            permissionRepairInProgress = false
+            restartCollector()
+        } else if Date().timeIntervalSince1970 - permissionRepairStarted > 600 {
+            permissionRepairInProgress = false
+        }
+    }
+
+    func restartCollector() {
+        guard !smokeTest, !collectorRestarting else { return }
+        collectorRestarting = true
+        let restart = Process()
+        restart.executableURL = URL(fileURLWithPath: "/bin/sh")
+        // Pass the path as an argument, never interpolate a shell command.
+        restart.arguments = ["-c", "sleep 1; exec /usr/bin/open -n \"$1\"", "dreamstime-reopen", Bundle.main.bundleURL.path]
+        do {
+            try restart.run()
+            // No .stopped flag: the measured-time service and sign-in survive.
+            NSApp.terminate(nil)
+        } catch { collectorRestarting = false }
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -217,6 +285,8 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
               url.host == "127.0.0.1", url.port == 43123,
               let body = message.body as? [String: String] else { return }
         switch body["type"] {
+        case "repair-access": repairAccess()
+        case "restart-collector": restartCollector()
         case "open-url":
             if let raw = body["url"], let url = URL(string: raw), url.scheme == "https", url.host == "dreams.checklists.workers.dev" { NSWorkspace.shared.open(url) }
         case "copy":
@@ -270,7 +340,7 @@ struct DreamsTimeMain {
             Darwin.close(descriptor)
             if !CommandLine.arguments.contains("--background") {
                 DistributedNotificationCenter.default().postNotificationName(
-                    Notification.Name("local.dreamstime.reopen"), object: nil, userInfo: nil,
+                    Notification.Name("local.dreamstime.reopen"), object: CommandLine.arguments.contains("--repair-access") ? "repair-access" : nil, userInfo: nil,
                     deliverImmediately: true)
             }
             return false

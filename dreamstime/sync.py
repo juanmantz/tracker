@@ -8,6 +8,8 @@ from . import __version__
 from .connection import Conflict, Rejected
 from .core import digest, monday, week_bounds
 from .dreams import build_worked_batch
+from decimal import Decimal, ROUND_FLOOR
+from .recognition import WORK_KINDS
 from .coordination import Coordination
 
 
@@ -30,6 +32,8 @@ class DreamsSync:
                 'retrying': bool(self.tracker.setting('auto_error_since')),
                 'action_required': 'sign-in' if 'sign-in expired' in (self.tracker.setting('sync_error') or '') else None,
                 'last': self.tracker.setting('last_sync'), 'error': self.tracker.setting('sync_error'),
+                'publication': self.tracker.setting('publication'),
+                'context_access': ('denied' if self.tracker.health.get('collector', {}).get('ax_trusted') is False and not self.tracker.health.get('accessibility') else 'allowed' if self.tracker.health.get('accessibility') else 'unknown'),
                 'pending': bool(self.tracker.setting('pending_sync')), 'weeks': list(self.tracker.setting('synced_weeks', {}))}
 
     def refresh(self):
@@ -79,24 +83,22 @@ class DreamsSync:
                 # Unassigned time is omitted and remains visible for a later correction.
                 report['reviewed'] = True
                 signature = digest([report['totals'], [(p['id'], p.get('dreams_id')) for p in report['projects']]])
-                last = self.tracker.setting('synced_weeks', {}).get(week)
-                try:
-                    batch = build_worked_batch(report, state, self.installation)
-                except ValueError as error:
-                    if automatic and str(error) == 'No assigned Dreams hours to sync for this week.':
-                        return {'unchanged': True, 'skipped': True}
-                    raise
-                nodes = {node['id']: node for node in state['nodes']}
-                def matches_remote(command):
-                    expected = command['measurement']
-                    saved = next((m for m in nodes[command['id']].get('measurements', []) if m.get('id') == expected['id']), {})
-                    return all(saved.get(key) == expected.get(key) for key in ('metric','amount','basis','period','scope','source'))
-                if last and last['signature'] == signature and all(matches_remote(c) for c in batch['commands']):
-                    self.tracker.set_setting('sync_error', None)
-                    return {**last, 'unchanged': True}
+                batch = build_worked_batch(report, state, self.installation)
+                assigned = sum(v for k,v in report['totals'].items() if k != 'unassigned')
                 pending = {'week': week, 'signature': signature, 'batch': batch,
-                           'seconds': sum(v for k,v in report['totals'].items() if k != 'unassigned'),
-                           'unassigned_seconds': report['totals'].get('unassigned', 0)}
+                           'seconds': assigned, 'unassigned_seconds': report['totals'].get('unassigned', 0)}
+                if not batch['commands']:
+                    waiting = {k:pending[k] for k in ('week','seconds','unassigned_seconds')}
+                    waiting.update(state='waiting_for_hour' if assigned else 'unassigned',
+                                   published_hours=0, retained_seconds=assigned, at=time.time(), skipped=True)
+                    self.tracker.set_setting('publication', waiting)
+                    self.tracker.set_setting('sync_error', None)
+                    return waiting
+                # Compare the actual remote snapshots, independent of unassigned
+                # activity or additional minutes retained on the Mac.
+                if self.matches_publication(pending, state):
+                    self.complete(pending, {'revision': state['revision']}, state=state)
+                    return {**self.status()['last'], 'unchanged': True}
                 self.tracker.set_setting('pending_sync', pending)
                 try:
                     result = self.connection.call('apply_changes', batch)
@@ -113,14 +115,54 @@ class DreamsSync:
                 self.tracker.set_setting('sync_error', str(error))
                 raise
 
-    def complete(self, pending, result):
+    @staticmethod
+    def published_hours(measurement):
+        # Also safely settle a saved pre-upgrade fractional request. The exact
+        # original request remains untouched for idempotent retry.
+        return int((Decimal(str(measurement['amount']['value']))).to_integral_value(rounding=ROUND_FLOOR))
+
+    def matches_publication(self, pending, state):
+        nodes = {n['id']: n for n in state.get('nodes', [])}
+        for command in pending['batch']['commands']:
+            expected = command['measurement']
+            hours = self.published_hours(expected)
+            node = nodes.get(command['id'])
+            if not node or node.get('archived') or node.get('kind') not in WORK_KINDS:
+                return False
+            saved = next((m for m in node.get('measurements', []) if m.get('id') == expected['id']), None)
+            # The Dreams whole-hour gate may remove a zero correction entirely.
+            if hours == 0 and saved is None:
+                continue
+            if not saved or isinstance(saved.get('amount', {}).get('value'), bool) or saved.get('amount') != {'value': hours, 'unit': 'hours'}:
+                return False
+            if any(saved.get(k) != expected.get(k) for k in ('metric','basis','scope','source')):
+                return False
+            if saved.get('period', {}).get('kind') not in ('Week', 'Custom'):
+                return False
+            if any(saved.get('period', {}).get(k) != expected.get('period', {}).get(k) for k in ('start','end')):
+                return False
+        return True
+
+    def complete(self, pending, result, *, state=None):
+        # HTTP success is only an accepted request. A fresh map is the receipt.
+        # Read failures leave pending_sync intact for the exact retry after restart.
+        state = self.connection.call('get_map') if state is None else state
+        if not self.matches_publication(pending, state):
+            # A confirmed response plus a successful read proves a mismatch,
+            # rather than an uncertain transport outcome. Rebuild on the next tick.
+            self.tracker.set_setting('pending_sync', None)
+            raise ValueError('Dreams did not confirm the published project hours. Recorded time is safe; automatic saving will retry.')
         last = {k:pending[k] for k in ('week','signature','seconds','unassigned_seconds')}
-        last.update(at=time.time(), revision=result.get('revision') if isinstance(result, dict) else None)
+        hours = sum(self.published_hours(c['measurement']) for c in pending['batch']['commands'])
+        last.update(at=time.time(), revision=state.get('revision'), published_hours=hours,
+                    retained_seconds=max(0, pending['seconds']-hours*3600),
+                    verification='dreamstime/published/v1', state='verified')
         weeks = self.tracker.setting('synced_weeks', {})
         weeks[pending['week']] = last
         with self.tracker.lock, self.tracker.db:
             self.tracker.set_setting('synced_weeks', weeks)
             self.tracker.set_setting('last_sync', last)
+            self.tracker.set_setting('publication', last)
             self.tracker.set_setting('pending_sync', None)
             self.tracker.set_setting('sync_error', None)
 

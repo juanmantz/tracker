@@ -40,6 +40,7 @@ function assignment(context,project,recommendation,segmentId){
   return controls;
 }
 const stateCopy={
+  permission_required:{title:'Project detection needs access',text:'App time is recorded, but macOS is blocking document context. Your unassigned time is kept.',action:'Repair project detection'},
   recording:{title:'Tracking is on',text:'Your active time is being saved.',action:'Pause tracking'},
   paused:{title:'Tracking is paused',text:'Your saved time is kept. Resume when you are ready.',action:'Resume tracking'},
   off:{title:'Tracking is off',text:'No new time is being recorded.',action:'Start tracking'},
@@ -56,8 +57,12 @@ function automaticStatus(d){
   if(d.automatic===false||d.weekly===false)return 'Automatic saving is paused in Settings. Your activity is kept on this Mac.';
   if(d.action_required==='sign-in')return 'Dreams authorization expired. Reconnect once in Settings; your recorded hours are safe.';
   if(d.error||d.pending)return 'Hours are safe on this Mac. Saving will retry automatically.';
-  const saved=d.last?.at?` Last saved ${new Date(d.last.at*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}.`:'';
-  return `Automatic saving is on. Project hours save every five minutes.${saved}`;
+  if(d.context_access==='denied')return 'Project detection is limited until Mac access is repaired. Activity remains available for a later correction.';
+  if(d.publication?.state==='waiting_for_hour')return `${secondsLabel(d.publication.retained_seconds)} assigned so far. Dreams publishes completed hours per project and week; partial time stays on this Mac.`;
+  if(d.publication?.state==='unassigned')return 'No project hours are ready to publish. Unassigned activity is preserved.';
+  if(d.last?.verification!=='dreamstime/published/v1')return 'Automatic saving is on. Published hours have not been verified yet.';
+  const saved=d.last?.at?` ${d.last.published_hours} whole hours verified in Dreams at ${new Date(d.last.at*1000).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'})}.`:'';
+  return `Automatic saving is on. Completed project hours are checked every five minutes.${saved}`;
 }
 function render(data){
   snapshot=data;
@@ -66,14 +71,14 @@ function render(data){
   $('#today-timer').textContent=timerLabel(r.today_seconds);$('#tracking-toggle').textContent=copy.action;$('#tracking-toggle').disabled=busy||r.state==='starting';
   $('#save-note').textContent=r.state==='browser_unavailable'?'Use a desktop work app for a few seconds to see this number increase.':r.state==='recording'?'This number increases as work is recorded.':'This is saved time. It will increase when activity is recorded.';
   $('#last-update').textContent=['failed','stale','off'].includes(r.state)?'No new time is being recorded.':r.state==='paused'?'Tracking stays paused until you resume.':r.last_sample_age_seconds===null?'No activity received yet.':r.last_sample_age_seconds<=4?'Activity updated just now.':`Last activity received ${Math.round(r.last_sample_age_seconds)} seconds ago.`;
-  $('#live-check').hidden=['failed','stale','off','paused','starting'].includes(r.state);
-  $('#window-permission').hidden=!(r.state==='recording'&&!data.health.accessibility);
+  $('#live-check').hidden=['failed','stale','off','paused','starting','permission_required'].includes(r.state);
+  $('#window-permission').hidden=!(['recording','permission_required'].includes(r.state)&&!data.health.accessibility);
   const current=data.current?.context,projects=Object.fromEntries(data.projects.map(p=>[p.id,p.name]));
   $('#current-label').textContent=r.state==='recording'?'Currently using':'Last detected app';
   $('#current-app').textContent=current?.app_name||'Nothing detected yet';
   $('#current-document').textContent=current?.title||((current?.source==='browser context missing')?'Browser tracking is not connected.':'Document name not available.');
-  $('#current-project').textContent=projects[data.current?.project]||'Identifying project';
-  $('#project-evidence').textContent=data.current?.project?(data.recommendation?.reason||data.current.reason):(data.recommendation?.candidates?.length?`Daily review will check ${data.recommendation.candidates.map(c=>c.name).join(', ')}.`:'Activity is saved for the daily project review.');
+  $('#current-project').textContent=projects[data.current?.project]||(r.state==='permission_required'?'Needs document access':'Unassigned');
+  $('#project-evidence').textContent=data.current?.project?(data.recommendation?.reason||data.current.reason):(data.recommendation?.candidates?.length?`Daily review will check ${data.recommendation.candidates.map(c=>c.name).join(', ')}.`:(r.state==='permission_required'?'Project review needs document context. This time remains unassigned.':'Activity is preserved for project review; uncertain time stays unassigned.'));
   $('#automatic-status').textContent=automaticStatus(data.dreams||{});
   $('#recent-list').replaceChildren();
   data.report.segments.slice(-4).reverse().forEach(segment=>{
@@ -130,7 +135,7 @@ function renderSettings(data,names){
   });if(!data.rules.length)$('#rule-list').append(make('p','No saved associations yet.','empty'));
 }
 function renderCheck(data){
-  const q=data.quickcheck,canCheck=!['failed','stale','off','paused','starting'].includes(data.recording?.state);$('#live-check-result').hidden=!q?.started||!canCheck;
+  const q=data.quickcheck,canCheck=!['failed','stale','off','paused','starting','permission_required'].includes(data.recording?.state);$('#live-check-result').hidden=!q?.started||!canCheck;
   if(!q?.started||!canCheck)return;
   const result=$('#live-check-result');result.replaceChildren();
   if(q.status==='passed'){
@@ -152,6 +157,7 @@ async function refresh(){
 async function toggleTracking(){
   if(!snapshot||connectionLost)return refresh();busy=true;$('#tracking-toggle').disabled=true;
   try{const state=snapshot.recording?.state;
+    if(state==='permission_required'){await openPermission();return;}
     if(snapshot.paused)await api('/api/pause',{paused:false});
     else if(state==='off')await api('/api/capture/start',{});
     else if(['failed','stale'].includes(state))await api('/api/sensor/restart',{});
@@ -160,7 +166,7 @@ async function toggleTracking(){
 }
 function download(name,data){if(nativeBridge){nativeBridge.postMessage({type:'download',name,content:JSON.stringify(data,null,2)});return;}const anchor=make('a'),url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));anchor.href=url;anchor.download=name;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 async function importFile(event,path,key,text){const file=event.target.files[0];if(!file)return;if(file.size>30*1024*1024)throw new Error('Choose a JSON file smaller than 30 MB.');const result=await api(path,{[key]:JSON.parse(await file.text())});event.target.value='';message(text(result));await refresh();}
-async function openPermission(){await api('/api/settings/accessibility',{});}
+async function openPermission(){if(nativeBridge){nativeBridge.postMessage({type:'repair-access'});return;}await api('/api/settings/accessibility',{});}
 document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.view)));
 window.addEventListener('hashchange',()=>navigate(location.hash.slice(1)));
 $('#dismiss-notice').addEventListener('click',()=>$('#notice').hidden=true);
@@ -179,7 +185,7 @@ $('#disconnect').addEventListener('click',()=>act(async()=>{await api('/api/drea
 $('#weekly-sync').addEventListener('change',e=>act(async()=>{await api('/api/dreams/automatic',{enabled:e.target.checked});message(e.target.checked?'Project matching and saving will run automatically.':'Automatic saving is paused.');await refresh();}));
 $('#sync').addEventListener('click',()=>act(async()=>{
   busy=true;$('#sync').disabled=true;$('#sync').textContent='Sending…';
-  try{const result=await api('/api/dreams/sync',{week:snapshot.report.week});message(result.unchanged?'Dreams already has these totals.':`${secondsLabel(result.seconds)} sent to Dreams for week of ${result.week}. ${secondsLabel(result.unassigned_seconds)} remains unassigned.`);}
+  try{const result=await api('/api/dreams/sync',{week:snapshot.report.week});message(result.skipped?`${secondsLabel(result.retained_seconds)} assigned; waiting for a completed hour per project. Partial time stays on this Mac.`:result.unchanged?'Dreams already has these verified whole-hour totals.':`${result.published_hours} whole hours verified in Dreams for week of ${result.week}. ${secondsLabel(result.retained_seconds)} stays on this Mac; ${secondsLabel(result.unassigned_seconds)} remains unassigned.`);}
   finally{busy=false;$('#sync').textContent='Save now';await refresh();}
 }));
 $('#dreams-file').addEventListener('change',e=>act(()=>importFile(e,'/api/dreams/import','map',r=>`${r.projects} Dreams projects connected.`)));
@@ -187,7 +193,7 @@ $('#chatgpt-file').addEventListener('change',e=>act(()=>importFile(e,'/api/chatg
 $('#desktop-optin').addEventListener('change',e=>act(async()=>{await api('/api/settings/desktop-context',{enabled:e.target.checked});message('Conversation context setting saved.');await refresh();}));
 $('#pair').addEventListener('click',()=>act(async()=>{if(nativeBridge)nativeBridge.postMessage({type:'copy',text:token});else await navigator.clipboard.writeText(token);message('Token copied. Paste it into the browser companion settings.');}));
 $('#diagnostics').addEventListener('click',()=>act(async()=>download('dreams-time-diagnostics.json',await api('/api/diagnostics'))));
-$('#restart').addEventListener('click',()=>act(async()=>{await api('/api/sensor/restart',{});await refresh();message('Capture restarted. Return to Tracking to see its status.');}));
+$('#restart').addEventListener('click',()=>act(async()=>{if(nativeBridge){nativeBridge.postMessage({type:'restart-collector'});return;}await api('/api/sensor/restart',{});await refresh();message('Capture restarted. Return to Tracking to see its status.');}));
 $('#run-selftest').addEventListener('click',()=>act(async()=>{
   const button=$('#run-selftest');button.disabled=true;button.textContent='Testing…';
   try{const result=await api('/api/selftest'),box=$('#selftest-result');box.hidden=false;box.replaceChildren(make('h2',result.passed?'Time calculations passed.':'Time calculations need attention.'),make('p',`8 fictional hours tested in ${result.elapsed_ms} ms. This does not verify Mac capture.`));result.checks.forEach(c=>box.append(make('div',`${c.passed?'✓':'✕'} ${c.name}`,'test-check')));}

@@ -137,3 +137,38 @@ class CallTests(unittest.TestCase):
         self.assertIn('listening',status['detail'])
 
 if __name__=='__main__':unittest.main()
+
+class ReviewCoverageTests(unittest.TestCase):
+    def test_inbox_counters_are_summarized_without_crowding_out_a_specific_file(self):
+        t=Tracker();t.import_projects(map_fixture())
+        try:
+            for i in range(220):
+                for dt in (0,2):
+                    t.ingest({'ts':BASE+i*4+dt,'idle':0,'app':'com.apple.mail','app_name':'Mail',
+                              'title':'All Inboxes – All Mail · '+str(i)+' unread'})
+            for offset in (882,884):
+                t.ingest({'ts':BASE+offset,'idle':0,'app':'com.figma.Desktop','app_name':'Figma',
+                          'title':'Specific client proposal','document':'https://figma.com/design/newFile/Proposal'})
+            payload=Coordination(t,None,'mac').review_payload(BASE+886)
+            self.assertEqual(len(payload['activities']),1)
+            self.assertEqual(payload['activities'][0]['title'],'Specific client proposal')
+            self.assertEqual(payload['unattributed_summary'][0]['app'],'Mail')
+            self.assertEqual(payload['summarized_groups'],220)
+            self.assertEqual(payload['omitted_groups'],220)
+            self.assertEqual(sum(r['seconds'] for r in payload['activities'])+payload['omitted_seconds'],
+                             t.report('2026-10-05')['total_seconds'])
+            self.assertLess(len(json.dumps(payload,separators=(',',':'))),18000)
+        finally:t.close()
+
+    def test_unicode_summary_still_fits_field_limit_and_reports_partial_coverage(self):
+        t=Tracker()
+        try:
+            for i in range(100):
+                for dt in (0,2):
+                    t.ingest({'ts':BASE+i*4+dt,'idle':0,'app':'app'+str(i),
+                              'app_name':str(i)+'🌳'*100,'title':''})
+            payload=Coordination(t,None,'mac').review_payload(BASE+402)
+            self.assertLess(len(json.dumps(payload,separators=(',',':'))),18000)
+            self.assertGreater(payload['summary_omitted_groups'],0)
+            self.assertEqual(payload['omitted_groups'],100)
+        finally:t.close()

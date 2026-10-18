@@ -103,9 +103,10 @@ class AutomaticTests(unittest.TestCase):
         self.assertEqual(report['total_seconds'], before)
         self.assertEqual(before, 25198)  # eight hours minus lunch and two-second resume boundary
         self.assertEqual(report['totals'].get('unassigned', 0), 0)
-        self.assertEqual(self.hours('atlas'), [round(report['totals']['atlas']/3600, 6)])
-        self.assertEqual(self.hours('birch'), [round(report['totals']['birch']/3600, 6)])
-        self.assertAlmostEqual(sum(self.hours('atlas')+self.hours('birch')), before/3600, places=5)
+        self.assertEqual(self.hours('atlas'), [int(report['totals']['atlas']//3600)])
+        self.assertEqual(self.hours('birch'), [int(report['totals']['birch']//3600)])
+        self.assertEqual(sum(self.hours('atlas')+self.hours('birch')), sum(int(v//3600) for v in report['totals'].values()))
+        self.assertLessEqual(sum(self.hours('atlas')+self.hours('birch'))*3600, before)
         writes = len(self.provider.writes)
         self.tick(29100)
         self.assertEqual(len(self.provider.writes), writes)  # unchanged totals: no duplicate hours
@@ -193,11 +194,11 @@ class AutomaticTests(unittest.TestCase):
         self.assertGreater(review['omitted_groups'],0)
 
     def test_archived_project_does_not_block_saving_other_current_work(self):
-        self.connect(); self.samples(0,60,title='Atlas Studio'); self.tick(60)
+        self.connect(); self.samples(0,3600,title='Atlas Studio'); self.tick(3600)
         self.provider.map['nodes'][0]['archived'] = True
         self.provider.map['revision'] += 1
-        self.samples(62,120,title='Birch Client'); self.tick(360)
-        self.assertEqual(self.hours('birch'),[round(58/3600,6)])
+        self.samples(3602,7260,title='Birch Client'); self.tick(7560)
+        self.assertEqual(self.hours('birch'),[1])
         self.assertIsNone(self.app.tracker.setting('sync_error'))
 
 

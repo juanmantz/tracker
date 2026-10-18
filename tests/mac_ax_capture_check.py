@@ -45,7 +45,13 @@ with tempfile.TemporaryDirectory() as temporary:
     subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict',str(APP)],check=True)
     wait_for(lambda:api('/api/diagnostics')['health'].get('collector'))
     old_pid=api('/api/diagnostics')['health']['collector']['collector_pid']
-    os.kill(old_pid,signal.SIGKILL)
+    denied = api('/api/snapshot')
+    assert denied['recording']['project_detection'] == 'permission_required', denied['recording']
+    assert denied['recording']['state'] != 'recording', denied['recording']
+    # Exercise the shipped repair action against the live installed app, rather
+    # than asking the owner to delete/re-add entries or restart processes.
+    subprocess.run([str(APP/'Contents/MacOS/DreamsTime'), '--repair-access'], check=True)
+    wait_for(lambda: api('/api/diagnostics')['health'].get('collector',{}).get('permission_repair') == 'settings_open', 45)
     signed=subprocess.run(['/usr/bin/codesign','-d','-r-',str(APP)],capture_output=True,text=True,check=True)
     requirement=signed.stdout+'\n'+signed.stderr
     requirement=next(line.split('designated => ',1)[1] for line in requirement.splitlines() if 'designated => ' in line)
@@ -76,15 +82,12 @@ db.commit()
     python=str(Path(python)/'bin/python3') if python else subprocess.check_output(['/usr/bin/which','python3'],text=True).strip()
     subprocess.run(['sudo',python,str(grant_script),'/Library/Application Support/com.apple.TCC/TCC.db',str(csreq)],check=True)
     subprocess.run(['sudo','/usr/bin/killall','tccd'],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    # Launch via LaunchServices, with the actual app identity used by customers.
-    # Intentional SIGKILL can leave a stale LaunchServices registration briefly.
-    # Request a fresh instance and retry that transient launch error.
-    for attempt in range(20):
-        opened=subprocess.run(['/usr/bin/open','-n','-g',str(APP)],capture_output=True,text=True)
-        if opened.returncode==0: break
-        time.sleep(.5)
-    else:
-        raise AssertionError('LaunchServices did not reopen the installed app: '+opened.stderr)
+    # Only this disposable CI runner provisions a grant. The shipped app only
+    # requests access through macOS; the owner must still allow it themselves.
+    # Leaving Settings exercises the automatic restart/recheck, with no Quit,
+    # terminal restart command, or manual timer check.
+    subprocess.run(['/usr/bin/open','-a','Finder'],check=True)
+    wait_for(lambda:api('/api/diagnostics')['health'].get('collector',{}).get('collector_pid') != old_pid, 60)
     trusted=wait_for(lambda:api('/api/diagnostics')['health'].get('collector',{}).get('ax_trusted'),45)
 
     fixture=temporary/'WindowFixture.swift'
@@ -127,7 +130,7 @@ app.run()
         assert collector['window_access_status']=='readable'
         wait_for(lambda:api('/api/snapshot')['recording']['sample_count']>snapshot['recording']['sample_count']+1)
         assert not subprocess.run(['/usr/bin/pgrep','-f','/project/native/activity-sensor'],capture_output=True).stdout
-        PROOF.write_text(json.dumps({'compact_update_installed':True,'app_identity':'local.dreamstime.companion',
+        PROOF.write_text(json.dumps({'compact_update_installed':True,'denial_not_reported_as_tracking_success':True,'repair_opened_settings':True,'collector_restarted_automatically':True,'app_identity':'local.dreamstime.companion',
                                     'accessibility_granted_in_isolated_ci':True,'actual_window_title_read':True,
                                     'permission_probe_and_window_read_agree':True,'separate_sensor_required':False}))
     finally:

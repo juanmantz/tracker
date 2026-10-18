@@ -79,8 +79,25 @@ def context_key(context):
     return digest(values)
 
 
+NOISE_APPS = {'com.apple.systempreferences', 'com.apple.installer', 'com.apple.CoreAuthUI',
+              'com.apple.SecurityAgent', 'com.apple.UserNotificationCenter', 'com.apple.ReportCrash',
+              'com.apple.DiskUtility', 'com.apple.archiveutility', 'local.dreamstime.companion'}
+
+
+def is_noise_context(context):
+    app = context.get('app', '')
+    title = normalize(context.get('title', ''))
+    if app in NOISE_APPS:
+        return True
+    if app == 'com.apple.mail' and re.match(r'^(all inboxes|all mail|inbox|mailboxes)(\b| )', title):
+        return True
+    if app == 'com.apple.finder' and re.fullmatch(r'\d{4}(?: \d{1,2}){0,2}', title):
+        return True
+    return False
+
+
 def rememberable(context):
-    if (context.get('excluded') or context.get('activity_kind') == 'call'
+    if (is_noise_context(context) or context.get('excluded') or context.get('activity_kind') == 'call'
             or (context.get('app') in CALL_APPS and re.search(r'\b(call|meeting|huddle)\b', context.get('title', ''), re.I))):
         return False
     if context.get('identity'):
@@ -420,7 +437,7 @@ class Tracker:
         self.previous = current
         self.current = current
         self.health.update(sensor="connected", accessibility=sample.get("accessibility", False), last_sample=ts)
-        self.health["collector"] = {k: sample[k] for k in ("collector_bundle", "collector_pid", "ax_trusted", "window_access_status") if k in sample}
+        self.health["collector"] = {k: sample[k] for k in ("collector_bundle", "collector_pid", "ax_trusted", "window_access_status", "permission_repair") if k in sample}
         self.health['input'] = {k: round(sample[k], 1) for k in ('mouse_idle', 'keyboard_idle') if isinstance(sample.get(k), (int, float)) and math.isfinite(sample[k]) and sample[k] >= 0}
         return True
 

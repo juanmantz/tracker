@@ -29,6 +29,7 @@ try{
   checks.push('Resume returns to the recording state');
   override={state:'failed'};await page.evaluate(()=>refresh());await page.getByRole('heading',{name:'Tracking is not working',exact:true}).waitFor();
   await page.getByRole('button',{name:'Restart tracking',exact:true}).waitFor();assert.equal(await page.locator('#live-check').isVisible(),false);assert.equal(await page.locator('#last-update').innerText(),'No new time is being recorded.');await page.screenshot({path:'artifacts/simple-blocked.png',fullPage:false});checks.push('Failed capture has a single Restart tracking action');
+  override={state:'permission_required'};await page.evaluate(()=>refresh());await page.getByRole('heading',{name:'Project detection needs access',exact:true}).waitFor();assert.equal(await page.locator('#live-check-result').isVisible(),false);await page.getByRole('button',{name:'Repair project detection',exact:true}).waitFor();checks.push('Denied native permission does not present a passing timer as successful project detection');
   override={state:'browser_unavailable'};await page.evaluate(()=>refresh());await page.getByText('Desktop app time is recorded. This browser is not included yet.',{exact:true}).waitFor();checks.push('Browser exclusion explains that desktop tracking remains on');
   override=null;await page.evaluate(()=>refresh());
   await page.getByRole('button',{name:'Projects',exact:true}).click();await page.locator('#project-name').fill('Dreams work');await page.locator('#project-form button').click();

@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from . import __version__
 from .connection import Conflict, Rejected
-from .core import context_key, rememberable
+from .core import context_key, rememberable, is_noise_context
 
 CONTROL_SCHEMA = 'dreamstime/control/v1'
 REVIEW_SCHEMA = 'dreamstime/review/v1'
@@ -112,7 +112,7 @@ class Coordination:
                     row['kind'] = 'call'
                 snapshot_id = context.get('snapshot_id')
                 card = self.tracker.context_snapshots.get(snapshot_id)
-                if card:
+                if card and not is_noise_context(context):
                     row['_snapshot'] = snapshot_id
                     cards[snapshot_id] = card
             health = dict(self.tracker.health)
@@ -122,15 +122,38 @@ class Coordination:
                 2 if row.get('_snapshot') or row['candidates'] else (1 if row['can_remember'] else 0))
             return (-quality, row['project'] is not None, -row['end'], -row['seconds'])
         ordered = sorted(rows.values(), key=priority)
+        # Generic app time has no project evidence. Keep its measured seconds in
+        # compact app/day summaries instead of crowding out identifiable files.
+        summaries, reviewable = {}, []
+        summarized_seconds = 0
+        summarized_groups = 0
+        for row in ordered:
+            if (row['project'] is None and not row['can_remember'] and not row.get('_snapshot')
+                    and not row['candidates'] and row.get('kind') != 'call'):
+                key = (row['app'], row['day'])
+                summary = summaries.setdefault(key, {'app':row['app'], 'day':row['day'], 'seconds':0, 'groups':0})
+                summary['seconds'] = round(summary['seconds'] + row['seconds'], 3)
+                summary['groups'] += 1
+                summarized_seconds += row['seconds']
+                summarized_groups += 1
+            else:
+                reviewable.append(row)
         payload = {'schema': REVIEW_SCHEMA, 'device': self.installation, 'version': __version__,
             'updated_at': now, 'timezone': self.tracker.timezone, 'paused': self.tracker.paused,
             'sensor': {k: health.get(k) for k in ('sensor','accessibility','last_sample','collector')},
-            'last_save': self.tracker.setting('last_sync'), 'sync_error': self.tracker.setting('sync_error'),
+            'last_save': self.tracker.setting('last_sync'), 'publication': self.tracker.setting('publication'), 'sync_error': self.tracker.setting('sync_error'),
             'local_review_at': self.tracker.setting('local_review_at'), 'context_storage': storage,
-            'activities': [], 'snapshots': {}, 'omitted_groups': len(ordered), 'omitted_seconds': 0}
+            'activities': [], 'snapshots': {}, 'omitted_groups': len(ordered), 'omitted_seconds': 0,
+            'summarized_groups': summarized_groups,
+            'unattributed_summary': sorted(summaries.values(), key=lambda r:(-r['seconds'],r['app'],r['day']))[:24],
+            'summary_omitted_groups': max(0, len(summaries)-24)}
+        while payload['unattributed_summary'] and len(json.dumps(payload, separators=(',', ':'))) > 8500:
+            payload['unattributed_summary'].pop()
+        payload['summarized_groups'] = sum(r['groups'] for r in payload['unattributed_summary'])
+        payload['summary_omitted_groups'] = summarized_groups - payload['summarized_groups']
         references = {}
-        omitted_seconds = 0
-        for row in ordered:
+        omitted_seconds = summarized_seconds
+        for row in reviewable:
             if len(payload['activities']) >= 160:
                 omitted_seconds += row['seconds']
                 continue

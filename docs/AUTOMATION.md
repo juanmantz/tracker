@@ -180,3 +180,46 @@ Visible conversation text, when enabled, is compared locally with existing proje
 names. Only project-ID hints persist. Its in-memory text cache expires within
 12 seconds of a new sample and clears on app changes, lock, Pause or opt-out.
 No conversation body is saved in a compact snapshot or device review record.
+
+
+## Verified whole-hour publication (0.10.0)
+
+The Mac floors measured seconds after combining assignments for the same Dreams
+asset and week. A project below 3,600 measured seconds produces no new Worked
+snapshot. Partial time remains in SQLite; unrelated projects are never combined
+to reach an hour. Corrections reuse only this device's stable snapshot ID and
+may zero a previously published total. Scope stays Own, so parent totals are
+computed by the graph without duplicating child work.
+
+A successful write response is not a publication receipt. The Mac reads the map
+back and checks the stable ID, destination, whole-hour value, unit, basis, scope,
+source and exact weekly dates. A failed read retains the identical pending request
+for retry. A confirmed mismatch is an error and does not advance last_sync.
+Old fractional pending requests are settled byte-for-byte and checked against
+Dreams' whole-hour normalization. The UI shows retained partial time separately
+from read-back-verified published hours. Ordinary changes in partial or unassigned
+seconds do not rewrite unchanged whole-hour snapshots.
+
+Device reports add publication, summarized_groups, unattributed_summary and
+summary_omitted_groups. Generic unassigned app/day time is summarized with measured
+seconds, without implying a project. It remains included in omitted_groups and
+omitted_seconds because those individual ranges were not supplied for review.
+Only exact activity context/start/end records support bounded corrections.
+Reports remain partial whenever omitted counts are nonzero.
+
+## Accessibility repair
+
+A foreground launch with denied access requests a repair once per installed build.
+The app runs the public tccutil reset command for Accessibility and its own bundle
+ID only, registers a fresh request through AXIsProcessTrustedWithOptions, and opens
+macOS Accessibility settings. The owner must allow the app in macOS. On grant or
+leaving Settings, the native collector restarts once automatically while retaining
+the time service, credentials, focus, associations and historical seconds. A valid
+grant is never reset; background launches do not open Settings or repeat a repair.
+The Repair project detection action can explicitly retry. Restart capture in the
+native app now actually relaunches the native collector.
+
+This repair does not access Keychain, grant access, modify TCC databases, or reset
+another application's permissions. CI-only authorization fixtures continue to use
+an exact code requirement in the disposable macOS runner. Ad-hoc signing remains
+a distribution limitation: future native updates may still need a macOS grant.

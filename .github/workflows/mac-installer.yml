@@ -37,6 +37,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Verify capture and whole-hour transfer contracts before building
+        run: python3 -m unittest discover -s tests -v
       - name: Fetch verified bundled Python runtimes
         run: |
           curl -fL --retry 2 'https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.12.15%2B20261009-aarch64-apple-darwin-install_only_stripped.tar.gz' -o /tmp/dreamstime-arm64.tar.gz
@@ -65,7 +67,7 @@ jobs:
           python3 - <<'PY'
           import json
           h=json.load(open('artifacts/native-release/health.json'))
-          assert h['app']=='dreams-time' and h['version']=='0.9.1' and h['capture_host']=='app'
+          assert h['app']=='dreams-time' and h['version']=='0.10.0' and h['capture_host']=='app'
           s=json.load(open('artifacts/native-release/native-sample.json'))
           assert isinstance(s['app'],str) and s['idle']>=0 and isinstance(s['accessibility'],bool)
           import time, urllib.request
@@ -100,7 +102,7 @@ jobs:
         run: python3 tests/mac_app_icon_check.py
       - uses: actions/upload-artifact@v4
         with:
-          name: Dreams-Time-0.9.1-Update
+          name: Dreams-Time-0.10.0-Update
           path: artifacts/native-release/Dreams-Time-Update.pkg
           compression-level: 0
       - name: Split download into manageable artifacts
@@ -146,16 +148,16 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          Path("artifacts/native-release/release-notes.txt").write_text("Dreams Time 0.9.1 adds compact Accessibility context snapshots, bounded to 512 bytes each and a 1 MB compressed payload budget with seven-day expiry. Snapshot text is deduplicated and review summaries prioritize calls and specific work context. Connected call controls let listening time count while the call is in the background, without double-counting foreground activity. Editable chat content, screenshots and call audio are not captured. The app enforces one native collector. Existing history and sign-in remain intact. This native collector update may require replacing the previous Accessibility permission entry in macOS.\n\nExisting installations: use Dreams-Time-Update.pkg. Recorded activity, pairing and private runtimes are preserved. New installations: use Dreams-Time-Installer.pkg.\n")
+          Path("artifacts/native-release/release-notes.txt").write_text("Dreams Time 0.10.0 repairs stale Accessibility requests for this app through macOS and automatically restarts the collector after permission setup. macOS still requires the owner's Allow; no permission is granted automatically. Denied document access now appears as blocked project detection rather than successful tracking. Publishing floors measured time to completed whole hours per project and week, retains partial hours locally, and verifies stable snapshots by reading Dreams back. Generic app time is summarized compactly so inbox counters do not crowd out file and call evidence. Existing history, project corrections, focus and sign-in are preserved.\n\nExisting installations: use Dreams-Time-Update.pkg. Install and allow Dreams Time in the permission settings opened by the app; no manual deletion, re-add, Sync button or timer check is required. New installations: use Dreams-Time-Installer.pkg. This version remains ad-hoc signed; future native updates may require access again.\n")
           PY
           LATEST_BUILD="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq '.object.sha')"
           if [[ "$LATEST_BUILD" != "$GITHUB_SHA" ]]; then
             echo "A newer build superseded this run; no download published."
             exit 0
           fi
-          if gh release view v0.9.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Version 0.9.1 is already released; keeping its installer immutable."
+          if gh release view v0.10.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Version 0.10.0 is already released; keeping its installer immutable."
             exit 0
           fi
-          gh release create v0.9.1 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dreams Time 0.9.1" --notes-file artifacts/native-release/release-notes.txt
-          gh release upload v0.9.1 --repo "$GITHUB_REPOSITORY" artifacts/native-release/Dreams-Time-Update.pkg artifacts/native-release/Dreams-Time-Installer.pkg artifacts/app-icon/Dreams-Time-Icon.png artifacts/app-icon/Dreams-Time-Icon-128.png
+          gh release create v0.10.0 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dreams Time 0.10.0" --notes-file artifacts/native-release/release-notes.txt
+          gh release upload v0.10.0 --repo "$GITHUB_REPOSITORY" artifacts/native-release/Dreams-Time-Update.pkg artifacts/native-release/Dreams-Time-Installer.pkg artifacts/app-icon/Dreams-Time-Icon.png artifacts/app-icon/Dreams-Time-Icon-128.png

@@ -26,6 +26,9 @@ class Provider:
         self.requests = {}
         self.writes = []
         self.fail_after_write = False
+        self.discard_measurements = False
+        self.fail_read_after_write = False
+        self.fail_next_map = False
         self.force_conflict = False
         self.refresh_count = 0
         self.require_app_headers = False
@@ -112,6 +115,9 @@ class Provider:
                     assert data['method'] == 'tools/call'
                     name, args = data['params']['name'], data['params']['arguments']
                     if name == 'get_map':
+                        if provider.fail_next_map:
+                            provider.fail_next_map = False
+                            return self.send(503, {})
                         output = copy.deepcopy(provider.map)
                     else:
                         assert name in ('apply_changes', 'create_node', 'update_node')
@@ -137,12 +143,18 @@ class Provider:
                                 assert command['type'] == 'record_measurement'
                                 node = next(n for n in provider.map['nodes'] if n['id'] == command['id'])
                                 measurement = command['measurement']
+                                assert measurement['amount']['value'] == int(measurement['amount']['value']) and measurement['amount']['value'] >= 0, 'Fractional publication forbidden'
+                                if provider.discard_measurements:
+                                    continue
                                 assert measurement['basis'] == 'Worked' and measurement['metric'] == 'workedHours'
                                 node['measurements'] = [m for m in node['measurements'] if m['id'] != measurement['id']] + [copy.deepcopy(measurement)]
                             provider.map['revision'] += 1
                             output = {'revision': provider.map['revision'], 'requestId': args['requestId']}
                             provider.requests[args['requestId']] = output
                             provider.writes.append(copy.deepcopy(args))
+                            if name == 'apply_changes' and provider.fail_read_after_write:
+                                provider.fail_read_after_write = False
+                                provider.fail_next_map = True
                             if provider.fail_after_write:
                                 provider.fail_after_write = False
                                 return self.send(503, {})
