@@ -44,6 +44,7 @@ class NativeHostTests(unittest.TestCase):
         self.assertFalse(collector['ax_trusted'])
         self.assertEqual(collector['window_access_status'], 'ax_error_-25211')
     def test_reading_our_own_window_does_not_prove_external_document_access(self):
+        self.app.start_sensor()
         self.app.accept_native_sample(self.sample(app='local.dreamstime.companion',app_name='Dreams Time',
             title='Dreams Time',accessibility=True,ax_trusted=False,window_access_status='readable'))
         snapshot=self.app.snapshot()

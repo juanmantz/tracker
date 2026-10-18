@@ -24,7 +24,7 @@ jobs:
         run: |
           gh api --method GET "repos/$GH_REPO/actions/workflows/mac-installer.yml/runs?branch=$BUILD_BRANCH&per_page=20" --jq '.workflow_runs[] | select(.status != "completed") | .id' > /tmp/dreams-build-runs
           while IFS= read -r BUILD_RUN; do
-            if [[ "$BUILD_RUN" != "$CURRENT_RUN" ]]; then
+            if (( BUILD_RUN < CURRENT_RUN )); then
               gh run cancel "$BUILD_RUN" --repo "$GH_REPO" || true
             fi
           done < /tmp/dreams-build-runs
