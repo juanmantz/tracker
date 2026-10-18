@@ -277,7 +277,7 @@ func startNativeActivitySensor(requestPermission: Bool = false,
             "app": bundle, "app_name": appName, "title": title, "document": document,
             "idle": idle, "mouse_idle": mouseIdle.isFinite ? mouseIdle : idle,
             "keyboard_idle": keyboardIdle.isFinite ? keyboardIdle : idle, "locked": locked,
-            "accessibility": trusted || windowAccessStatus == "readable", "ax_trusted": trusted,
+            "accessibility": trusted || (windowAccessStatus == "readable" && foreground?.processIdentifier != ProcessInfo.processInfo.processIdentifier), "ax_trusted": trusted,
             "window_access_status": windowAccessStatus, "collector_bundle": Bundle.main.bundleIdentifier ?? "standalone",
             "collector_pid": ProcessInfo.processInfo.processIdentifier]
         if !conversationText.isEmpty {

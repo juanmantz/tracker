@@ -191,6 +191,10 @@ class App:
         ts = sample.get("ts")
         if not isinstance(ts, (int, float)) or isinstance(ts, bool) or not time.time() - 10 <= ts <= time.time() + 5:
             raise ValueError("Expected a current native sample.")
+        # Reading our own window is possible without a global Accessibility grant.
+        # It must never make the dashboard claim that other documents are readable.
+        if sample.get('app') == 'local.dreamstime.companion' and sample.get('ax_trusted') is False:
+            sample = {**sample, 'accessibility': False}
         if not settings['desktop_context_enabled']:
             sample = {k: v for k, v in sample.items() if k not in (
                 'context_snapshot', 'call_session', 'call_active', 'call_verified_at', 'call_proof',

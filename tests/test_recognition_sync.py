@@ -121,7 +121,8 @@ class IntegrationTests(unittest.TestCase):
         self.assertEqual(len(self.app.tracker.projects()),2)
 
     def activity(self, seconds=3600):
-        for offset in range(0,seconds+1,2):
+        # Accelerate the clock in <=max_gap steps; no wall-clock hour is needed.
+        for offset in [*range(0,seconds,10), seconds]:
             self.app.tracker.ingest({'ts':BASE+offset,'idle':0,'app':'com.figma.Desktop','app_name':'Figma','title':'Renamed file','document':'https://figma.com/design/atlasFile/Unrelated'})
 
     def hours(self, target='atlas'):

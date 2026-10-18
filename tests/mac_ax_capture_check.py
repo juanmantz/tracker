@@ -92,10 +92,11 @@ db.commit()
         if opened.returncode==0: break
         time.sleep(.5)
     else: raise AssertionError('LaunchServices could not start denied fixture: '+opened.stderr)
+    subprocess.run(['/usr/bin/open','-a','Finder'],check=True)
     def denied_capture():
         snapshot=api('/api/snapshot')
         collector=snapshot['health'].get('collector',{})
-        return snapshot if collector.get('collector_pid') != old_pid and collector.get('ax_trusted') is False else None
+        return snapshot if collector.get('collector_pid') != old_pid and collector.get('ax_trusted') is False and snapshot['health'].get('accessibility') is False else None
     denied=wait_for(denied_capture,45)
     old_pid=denied['health']['collector']['collector_pid']
     assert denied['recording']['project_detection']=='permission_required',denied['recording']

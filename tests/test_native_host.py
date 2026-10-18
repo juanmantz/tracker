@@ -43,6 +43,14 @@ class NativeHostTests(unittest.TestCase):
         collector = self.app.snapshot()['health']['collector']
         self.assertFalse(collector['ax_trusted'])
         self.assertEqual(collector['window_access_status'], 'ax_error_-25211')
+    def test_reading_our_own_window_does_not_prove_external_document_access(self):
+        self.app.accept_native_sample(self.sample(app='local.dreamstime.companion',app_name='Dreams Time',
+            title='Dreams Time',accessibility=True,ax_trusted=False,window_access_status='readable'))
+        snapshot=self.app.snapshot()
+        self.assertFalse(snapshot['health']['accessibility'])
+        self.assertEqual(snapshot['recording']['project_detection'],'permission_required')
+        self.assertEqual(snapshot['recording']['state'],'permission_required')
+
     def test_legacy_or_stale_collector_cannot_submit_as_the_current_app(self):
         for sample in [self.sample(collector_bundle='local.dreamstime.sensor'), self.sample(ts=time.time()-60)]:
             with self.assertRaises(ValueError): self.app.accept_native_sample(sample)
