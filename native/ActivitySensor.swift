@@ -361,6 +361,7 @@ func startNativeActivitySensor(requestPermission: Bool = false,
         if let (text, at) = screenEvidence, !text.isEmpty {
             event["screen_context"] = text
             event["screen_context_at"] = at
+            event["context_capture_state"] = "screen_ocr"
         }
         if !conversationText.isEmpty {
             event["desktop_context"] = conversationText

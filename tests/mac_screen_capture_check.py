@@ -113,6 +113,7 @@ app.run()
         c=snapshot['current']['context'];health=snapshot['health']['collector']
         assert health['ax_trusted'] is False and health['screen_capture_permission'] is True
         assert health['screen_capture_count']>=1
+        assert health['context_capture_state']=='screen_ocr',health
         with sqlite3.connect(SUPPORT/'activity.sqlite') as db:
             card=json.loads(zlib.decompress(db.execute('SELECT payload FROM context_snapshots WHERE id=?',(c['snapshot_id'],)).fetchone()[0]))
         assert card['source']=='screen_ocr' and card['labels']==['Fixture project 3'],card
