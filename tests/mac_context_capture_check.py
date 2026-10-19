@@ -61,7 +61,10 @@ var webDelegate: NSObject?
 if mode=="conversation" {
     class Ready: NSObject, WKNavigationDelegate {
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            DispatchQueue.main.asyncAfter(deadline:.now()+1) { webView.evaluateJavaScript("document.getElementById('prompt').focus()",completionHandler:nil) }
+            DispatchQueue.main.asyncAfter(deadline:.now()+1) {
+                webView.window?.makeFirstResponder(webView)
+                webView.evaluateJavaScript("document.getElementById('prompt').focus()",completionHandler:nil)
+            }
         }
     }
     let web=WKWebView(frame:window.contentView!.bounds)
@@ -70,7 +73,7 @@ if mode=="conversation" {
     window.contentView!.addSubview(web)
     let history=String(repeating:"<div>Fixture project 7 - unrelated history</div>",count:120)
     let before=String(repeating:"<div>",count:35),after=String(repeating:"</div>",count:35)
-    web.loadHTMLString("<html><body><aside aria-label='sidebar'>"+history+"</aside>"+before+"<main aria-label='conversation'><h1>Fixture project 3</h1><p>Current storyboard discussion.</p><textarea id='prompt'>PRIVATE DRAFT MUST NEVER ENTER SNAPSHOTS</textarea></main>"+after+"</body></html>",baseURL:nil)
+    web.loadHTMLString("<html><head><style>body{display:grid;grid-template-columns:160px 1fr;height:100vh;margin:0}aside{overflow:auto;height:100vh}main{padding:20px}</style></head><body><aside aria-label='sidebar'>"+history+"</aside>"+before+"<main aria-label='conversation'><h1>Fixture project 3</h1><p>Current storyboard discussion.</p><textarea id='prompt'>PRIVATE DRAFT MUST NEVER ENTER SNAPSHOTS</textarea></main>"+after+"</body></html>",baseURL:nil)
 }
 if mode != "conversation" && mode != "metadata" {
 let header=NSTextField(labelWithString:mode=="call" ? "00:03" : "Fixture project 3 - storyboard")
@@ -120,8 +123,17 @@ app.run()
         try:
             def matched_conversation():
                 value=current() or {}
-                return value if value.get('project')=='fixture-3' and value.get('context',{}).get('context_scope')=='conversation' else None
-            active=wait_for(matched_conversation)
+                return value if value.get('project')=='fixture-3' and value.get('context',{}).get('context_scope') in ('conversation','conversation_header') else None
+            try:
+                active=wait_for(matched_conversation)
+            except AssertionError:
+                value=current() or {}
+                print(json.dumps({'synthetic_conversation_failure':{'project':value.get('project'),'active':value.get('active'),
+                    'app':value.get('context',{}).get('app'),
+                    'context_scope':value.get('context',{}).get('context_scope'),
+                    'hints':value.get('context',{}).get('project_hints'),
+                    'collector':api('/api/diagnostics').get('health',{}).get('collector')}}),flush=True)
+                raise
             assert active['project']!='fixture-7','Sidebar history won over the current conversation'
             assert 'PRIVATE DRAFT' not in json.dumps(active['context'])
         finally:

@@ -64,7 +64,9 @@ func startNativeActivitySensor(requestPermission: Bool = false,
             if ["sidebar", "navigation", "chat history"].contains(where: { description.contains($0) || identifier.contains($0) }) { continue }
             let inToolbar = toolbar || role == "AXToolbar"
             let inMain = main || text(node, "AXSubrole") == "AXLandmarkMain" ||
-                ["conversation", "chat messages", "main content"].contains(description)
+                role == "AXLandmarkMain" || (["AXGroup", "AXScrollArea", "AXWebArea"].contains(role) &&
+                (["conversation", "chat messages", "main content", "contenido principal"].contains(where: { description.contains($0) }) ||
+                 text(node, "AXRoleDescription").lowercased() == "main"))
             let explicitHeader = ["document-title", "conversation-title", "meeting-title"].contains(identifier) ||
                 ["document title", "conversation title", "meeting title"].contains(description)
             let isHeader = explicitHeader || (role == "AXStaticText" && inToolbar) ||
@@ -168,9 +170,14 @@ func startNativeActivitySensor(requestPermission: Bool = false,
         }
         func isConversation(_ node: AXUIElement) -> Bool {
             if isNavigation(node) { return false }
-            return text(node, "AXSubrole") == "AXLandmarkMain" || text(node, "AXRole") == "AXLandmarkMain" ||
-                ["conversation", "chat messages", "main content"].contains(text(node, "AXDescription").lowercased()) ||
-                ["conversation", "main-content", "conversation-pane"].contains(text(node, "AXIdentifier").lowercased())
+            let role = text(node, "AXRole")
+            if text(node, "AXSubrole") == "AXLandmarkMain" || role == "AXLandmarkMain" { return true }
+            guard ["AXGroup", "AXScrollArea", "AXWebArea"].contains(role) else { return false }
+            let description = text(node, "AXDescription").lowercased()
+            let identifier = text(node, "AXIdentifier").lowercased()
+            return ["conversation", "chat messages", "main content", "contenido principal"].contains(where: { description.contains($0) }) ||
+                ["conversation", "main-content", "conversation-pane"].contains(identifier) ||
+                text(node, "AXRoleDescription").lowercased() == "main"
         }
         // The focused composer is often deeply nested. Walk only its parents
         // to find an explicitly marked main region; never infer a whole window.
@@ -230,7 +237,9 @@ func startNativeActivitySensor(requestPermission: Bool = false,
             if role == "AXStaticText" || role == "AXHeading" {
                 var value: CFTypeRef?
                 _ = AXUIElementCopyAttributeValue(node, kAXValueAttribute as CFString, &value)
-                if let text = value as? String, !text.isEmpty { output.append(String(text.prefix(1000))) }
+                let valueText = value as? String ?? ""
+                let label = valueText.isEmpty ? text(node, "AXTitle") : valueText
+                if !label.isEmpty { output.append(String(label.prefix(1000))) }
             }
             if depth < 8 {
                 var children: CFTypeRef?
