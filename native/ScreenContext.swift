@@ -71,10 +71,14 @@ final class ScreenContext {
                             request.usesLanguageCorrection = false
                             // Exclude ChatGPT history on the left and the bottom
                             // composer before OCR. No browser/incognito capture.
-                            request.regionOfInterest = Self.chatApps.contains(bundle)
-                                ? CGRect(x: 0.30, y: 0.30, width: 0.68, height: 0.65)
-                                : CGRect(x: 0, y: 0.15, width: 1, height: 0.80)
-                            if (try? VNImageRequestHandler(cgImage: image).perform([request])) != nil {
+                            let width=Double(image.width), height=Double(image.height)
+                            let crop = Self.chatApps.contains(bundle)
+                                ? CGRect(x: width*0.30, y: height*0.05, width: width*0.68, height: height*0.65)
+                                : CGRect(x: 0, y: height*0.05, width: width, height: height*0.80)
+                            // Remove pixels physically before recognition; a
+                            // Vision ROI alone is not a privacy/cropping boundary.
+                            if let cropped=image.cropping(to: crop.integral),
+                               (try? VNImageRequestHandler(cgImage: cropped).perform([request])) != nil {
                                 text = String((request.results ?? []).compactMap { observation -> String? in
                                     guard let value = observation.topCandidates(1).first, value.confidence >= 0.6 else { return nil }
                                     return value.string

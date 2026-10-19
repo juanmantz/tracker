@@ -29,7 +29,8 @@ def wait_for(check,timeout=50):
         except (OSError,ValueError,KeyError):pass
         time.sleep(.5)
     s=api('/api/snapshot')
-    raise AssertionError('Screenshot capture failed: '+json.dumps({'collector':s['health'].get('collector'),'project':(s.get('current')or{}).get('project'),'app':(s.get('current')or{}).get('context',{}).get('app'),'idle':(s.get('current')or{}).get('idle')}))
+    c=(s.get('current')or{}).get('context',{})
+    raise AssertionError('Screenshot capture failed: '+json.dumps({'collector':s['health'].get('collector'),'project':(s.get('current')or{}).get('project'),'app':c.get('app'),'hints':c.get('project_hints'),'scope':c.get('context_scope'),'idle':(s.get('current')or{}).get('idle')}))
 
 with tempfile.TemporaryDirectory() as temporary:
     folder=Path(temporary)

@@ -94,14 +94,14 @@ jobs:
           PY
       - name: Verify preserved hours and live sign-in setup from the installed app
         run: python3 tests/mac_upgrade_check.py verify
-      - name: Verify unattended recovery of the installed app
-        run: python3 tests/mac_autonomy_check.py
       - name: Prove Accessibility and document capture in the installed app process
         run: python3 tests/mac_ax_capture_check.py
       - name: Verify compact context, background call capture and a single app instance
         run: python3 tests/mac_context_capture_check.py
       - name: Prove real foreground screenshots, OCR and measured project time without Accessibility
         run: python3 tests/mac_screen_capture_check.py
+      - name: Verify unattended recovery of the installed app
+        run: python3 tests/mac_autonomy_check.py
       - name: Verify the real installed native app icon
         run: python3 tests/mac_app_icon_check.py
       - uses: actions/upload-artifact@v4
