@@ -11,6 +11,9 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
     var background = CommandLine.arguments.contains("--background")
     var permissionPrompted = false
     var screenPrompted = false
+    var screenRepairInProgress = false
+    var screenSettingsSeen = false
+    var screenRequestAt: Double = 0
     var permissionRepairInProgress = false
     var permissionSettingsSeen = false
     var permissionRepairStarted: Double = 0
@@ -111,6 +114,7 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
 
     func submitSample(_ rawSample: [String: Any]) {
         checkPermissionRepair()
+        checkScreenPermission()
         var sample = rawSample
         sample["permission_repair"] = permissionRepairInProgress ? (permissionSettingsSeen ? "settings_open" : "waiting_for_allow") : (AXIsProcessTrusted() ? "ready" : "required")
         let support = home.appendingPathComponent("Library/Application Support/Dreams Time")
@@ -211,6 +215,9 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
 
     func requestScreenAccess() {
         guard !smokeTest else { return }
+        screenRepairInProgress = true
+        screenSettingsSeen = false
+        screenRequestAt = Date().timeIntervalSince1970
         UserDefaults.standard.set(true, forKey: "screenCaptureRequested")
         DispatchQueue.global().async {
             let granted = CGRequestScreenCaptureAccess()
@@ -219,6 +226,20 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
                     NSWorkspace.shared.open(url)
                 }
             }
+        }
+    }
+
+    func checkScreenPermission() {
+        guard screenRepairInProgress else { return }
+        let front = NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? ""
+        if front == "com.apple.systempreferences" { screenSettingsSeen = true }
+        if CGPreflightScreenCaptureAccess() || (screenSettingsSeen && front != "com.apple.systempreferences") {
+            screenRepairInProgress = false
+            // macOS can cache a Screen Recording denial until process restart.
+            // Refresh once after setup; the service and measured history survive.
+            restartCollector()
+        } else if Date().timeIntervalSince1970 - screenRequestAt > 600 {
+            screenRepairInProgress = false
         }
     }
 

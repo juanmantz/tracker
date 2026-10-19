@@ -74,7 +74,9 @@ function render(data){
   $('#live-check').hidden=['failed','stale','off','paused','starting','permission_required'].includes(r.state);
   const screen=data.health.collector||{};
   $('#screen-permission').hidden=!data.desktop_context_enabled||screen.screen_capture_permission!==false;
-  $('#window-permission').hidden=!(['recording','permission_required'].includes(r.state)&&!data.health.accessibility&&screen.screen_capture_permission!==true);
+  const screenSetup=data.desktop_context_enabled&&screen.screen_capture_permission===false;
+  if(screenSetup)$('#tracking-description').textContent='App time is recorded. Allow Screen Recording once to identify projects from the active work window.';
+  $('#window-permission').hidden=!(['recording','permission_required'].includes(r.state)&&!data.health.accessibility&&screen.screen_capture_permission!==true&&!screenSetup);
   const current=data.current?.context,projects=Object.fromEntries(data.projects.map(p=>[p.id,p.name]));
   $('#current-label').textContent=r.state==='recording'?'Currently using':'Last detected app';
   $('#current-app').textContent=current?.app_name||'Nothing detected yet';
