@@ -7,6 +7,13 @@ WORK_KINDS = {'project', 'product', 'service', 'content', 'personal', 'inbound',
 GENERIC = {'app','apps','client','clients','design','project','projects','work','studio','chatgpt','figma','new tab','untitled'}
 
 
+def screen_text(value):
+    # Vision can emit the Cyrillic letter Ze for a printed digit 3. Apply this
+    # visual correction only to OCR, never identities, saved titles or rules.
+    # Keep exact project-name matching and ambiguity checks after correction.
+    return value.translate(str.maketrans({'\u0417':'3','\u0437':'3'}))
+
+
 def normalize(text):
     text = ''.join(c for c in unicodedata.normalize('NFKD', str(text)).casefold() if not unicodedata.combining(c))
     return ' '.join(re.findall(r'[a-z0-9]+', text))

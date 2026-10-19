@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
-from .recognition import recognize, WORK_KINDS, normalize, GENERIC
+from .recognition import recognize, WORK_KINDS, normalize, GENERIC, screen_text
 from .context_snapshots import ContextSnapshots, verified_call, CALL_APPS
 
 BROWSERS = {"com.google.Chrome", "com.google.Chrome.beta", "com.microsoft.edgemac", "com.brave.Browser", "company.thebrowser.Browser", "com.apple.Safari", "org.mozilla.firefox"}
@@ -392,7 +392,7 @@ class Tracker:
                     sample.get('idle', 0) < self.idle_after and isinstance(screen_at, (int, float)) and
                     not isinstance(screen_at, bool) and math.isfinite(screen_at) and
                     0 <= sample['ts'] - screen_at <= 12 and isinstance(sample.get('screen_context'), str)):
-                matches = recognize(context, self.setting('recognition_catalog', []), snippets=[sample['screen_context'][:6000]])
+                matches = recognize(context, self.setting('recognition_catalog', []), snippets=[screen_text(sample['screen_context'][:6000])])
                 if matches['candidates']:
                     context['project_hints'] = [{'project': c['project']} for c in matches['candidates']]
                     context['context_scope'] = 'screenshot'

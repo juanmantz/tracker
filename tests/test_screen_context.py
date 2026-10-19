@@ -46,6 +46,16 @@ class ScreenEvidenceTests(unittest.TestCase):
         self.assertEqual(self.t.current['project'],'birch')
         self.sample(8,'Unrelated topic');self.assertIsNone(self.t.current['project'])
 
+    def test_real_vision_output_with_cyrillic_digit_lookalike_matches_only_the_clear_project(self):
+        self.t.import_projects({'revision':1,'nodes':[{'id':'fixture-'+str(i),'kind':'project',
+            'name':'Fixture project '+str(i),'fields':{}} for i in range(11)],'edges':[]})
+        self.sample(0,'7 Fixture project \u0417\nStoryboard work')
+        self.assertEqual(self.t.current['project'],'fixture-3')
+        self.sample(2,'Fixture project \u0417 and Fixture project 7')
+        self.assertIsNone(self.t.current['project'])
+        self.sample(4,'Unrelated work',title='Fixture project \u0417')
+        self.assertIsNone(self.t.current['project'])
+
 
 class ScreenTransferTests(unittest.TestCase):
     setUp=integration.IntegrationTests.setUp
