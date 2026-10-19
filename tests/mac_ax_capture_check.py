@@ -88,7 +88,8 @@ db.commit()
     subprocess.run(['/usr/bin/csreq','-r-','-b',str(stale)],
         input='identifier "local.dreamstime.companion" and cdhash H"'+'00'*20+'"',
         text=True,check=True)
-    subprocess.run(['sudo',python,str(grant_script),'/Library/Application Support/com.apple.TCC/TCC.db',str(stale)],check=True)
+    for database in ['/Library/Application Support/com.apple.TCC/TCC.db',str(Path.home()/'Library/Application Support/com.apple.TCC/TCC.db')]:
+        subprocess.run(['sudo',python,str(grant_script),database,str(stale)],check=True)
     # Isolate the AX denial contract: screen OCR has its own later test.
     for database in ['/Library/Application Support/com.apple.TCC/TCC.db',str(Path.home()/'Library/Application Support/com.apple.TCC/TCC.db')]:
         subprocess.run(['sudo',python,str(grant_script),database,str(csreq),'kTCCServiceScreenCapture','0'],check=True)
@@ -113,7 +114,8 @@ db.commit()
     # Now exercise the shipped repair action, not another fixture reset/restart.
     subprocess.run([str(APP/'Contents/MacOS/DreamsTime'),'--repair-access'],check=True)
     wait_for(lambda:api('/api/diagnostics')['health'].get('collector',{}).get('permission_repair')=='settings_open',45)
-    subprocess.run(['sudo',python,str(grant_script),'/Library/Application Support/com.apple.TCC/TCC.db',str(csreq)],check=True)
+    for database in ['/Library/Application Support/com.apple.TCC/TCC.db',str(Path.home()/'Library/Application Support/com.apple.TCC/TCC.db')]:
+        subprocess.run(['sudo',python,str(grant_script),database,str(csreq)],check=True)
     subprocess.run(['sudo','/usr/bin/killall','tccd'],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     # Only this disposable CI runner provisions a grant. The shipped app only
     # requests access through macOS; the owner must still allow it themselves.
