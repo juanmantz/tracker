@@ -29,7 +29,7 @@ def wait_for(check,timeout=50):
         except (OSError,ValueError,KeyError):pass
         time.sleep(.5)
     s=api('/api/snapshot')
-    raise AssertionError('Screenshot capture failed: '+json.dumps({'collector':s['health'].get('collector'),'project':(s.get('current')or{}).get('project')}))
+    raise AssertionError('Screenshot capture failed: '+json.dumps({'collector':s['health'].get('collector'),'project':(s.get('current')or{}).get('project'),'app':(s.get('current')or{}).get('context',{}).get('app'),'idle':(s.get('current')or{}).get('idle')}))
 
 with tempfile.TemporaryDirectory() as temporary:
     folder=Path(temporary)
@@ -67,6 +67,9 @@ db.commit()
     fixture.write_text('''import AppKit
 let app=NSApplication.shared
 app.setActivationPolicy(.regular)
+let menu=NSMenu(),item=NSMenuItem(),submenu=NSMenu()
+submenu.addItem(withTitle:"Quit",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
+item.submenu=submenu;menu.addItem(item);app.mainMenu=menu
 class Pixels:NSView {
  override func draw(_ rect:NSRect) {
   NSColor.white.setFill();bounds.fill()
@@ -81,7 +84,12 @@ let window=NSWindow(contentRect:NSRect(x:120,y:120,width:900,height:600),styleMa
 window.title="ChatGPT";window.contentView=Pixels(frame:window.contentView!.bounds)
 window.makeKeyAndOrderFront(nil);app.activate(ignoringOtherApps:true)
 // CI generates real mouse activity only inside its synthetic fixture.
-let timer=Timer.scheduledTimer(withTimeInterval:1,repeats:true){_ in CGEvent(mouseEventSource:nil,mouseType:.mouseMoved,mouseCursorPosition:CGPoint(x:700,y:350),mouseButton:.left)?.post(tap:.cghidEventTap)}
+let timer=Timer.scheduledTimer(withTimeInterval:1,repeats:true){_ in
+    // The permission-triggered relaunch finishes asynchronously. Keep the
+    // synthetic work window in front while its pixels are being verified.
+    window.makeKeyAndOrderFront(nil);app.activate(ignoringOtherApps:true)
+    CGEvent(mouseEventSource:nil,mouseType:.mouseMoved,mouseCursorPosition:CGPoint(x:700,y:350),mouseButton:.left)?.post(tap:.cghidEventTap)
+}
 app.run()
 ''')
     bundle=folder/'PixelFixture.app';executable=bundle/'Contents/MacOS/Pixels'
