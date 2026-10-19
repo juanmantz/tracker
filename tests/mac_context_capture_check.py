@@ -91,6 +91,11 @@ window.contentView!.addSubview(draft)
 }
 window.makeKeyAndOrderFront(nil)
 app.activate(ignoringOtherApps:true)
+// Exercise active conversation use, rather than expecting the production
+// reader to inspect an idle session. This runs only in the synthetic CI app.
+let activityTimer=Timer.scheduledTimer(withTimeInterval:1,repeats:true){_ in
+    if mode=="conversation" { CGEvent(mouseEventSource:nil,mouseType:.mouseMoved,mouseCursorPosition:CGPoint(x:650,y:350),mouseButton:.left)?.post(tap:.cghidEventTap) }
+}
 app.run()
 """)
     def launch(name,bundle,mode):
@@ -101,6 +106,24 @@ app.run()
             'CFBundleExecutable':'Fixture','CFBundleName':name,'CFBundlePackageType':'APPL'}))
         subprocess.run(['/usr/bin/xcrun','swiftc',str(source),'-o',str(binary)],check=True)
         subprocess.run(['/usr/bin/codesign','--sign','-','--force',str(path)],check=True)
+        if bundle=='com.openai.chatgpt':
+            # Exact code grant for mouse-event generation by this disposable
+            # fixture. The installed collector's permission is unchanged.
+            signed=subprocess.run(['/usr/bin/codesign','-d','-r-',str(path)],capture_output=True,text=True,check=True)
+            requirement=next(line.split('designated => ',1)[1] for line in (signed.stdout+'\n'+signed.stderr).splitlines() if 'designated => ' in line)
+            csreq=directory/'conversation.csreq'
+            subprocess.run(['/usr/bin/csreq','-r-','-b',str(csreq)],input=requirement,text=True,check=True)
+            provision=directory/'active-fixture-ci.py'
+            provision.write_text('''import sqlite3,sys,time
+db=sqlite3.connect('/Library/Application Support/com.apple.TCC/TCC.db')
+values={'service':'kTCCServiceAccessibility','client':'com.openai.chatgpt','client_type':0,'auth_value':2,'auth_reason':4,'auth_version':1,'csreq':open(sys.argv[1],'rb').read(),'policy_id':None,'indirect_object_identifier_type':0,'indirect_object_identifier':'UNUSED','indirect_object_code_identity':None,'flags':0,'last_modified':int(time.time()),'pid':0,'pid_version':0,'boot_uuid':'UNUSED','last_reminded':0}
+keys=[c[1] for c in db.execute('PRAGMA table_info(access)').fetchall() if c[1] in values]
+db.execute('DELETE FROM access WHERE service=? AND client=?',('kTCCServiceAccessibility','com.openai.chatgpt'))
+db.execute('INSERT INTO access('+','.join(keys)+') VALUES('+','.join('?' for _ in keys)+')',[values[k] for k in keys]);db.commit()
+''')
+            python=str(Path(os.environ['pythonLocation'])/'bin/python3')
+            subprocess.run(['sudo',python,str(provision),str(csreq)],check=True)
+            subprocess.run(['sudo','/usr/bin/killall','tccd'],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
         return subprocess.Popen([str(binary),mode])
     # The production instance lock must also cover direct login-job starts and
     # LaunchServices "new instance" requests, without a second competing sampler.
