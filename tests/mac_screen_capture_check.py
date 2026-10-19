@@ -30,7 +30,7 @@ def wait_for(check,timeout=50):
         time.sleep(.5)
     s=api('/api/snapshot')
     c=(s.get('current')or{}).get('context',{})
-    raise AssertionError('Screenshot capture failed: '+json.dumps({'collector':s['health'].get('collector'),'project':(s.get('current')or{}).get('project'),'app':c.get('app'),'hints':c.get('project_hints'),'scope':c.get('context_scope'),'idle':(s.get('current')or{}).get('idle')}))
+    raise AssertionError('Screenshot capture failed: '+json.dumps({'collector':s['health'].get('collector'),'project':(s.get('current')or{}).get('project'),'app':c.get('app'),'hints':c.get('project_hints'),'scope':c.get('context_scope'),'idle':(s.get('current')or{}).get('idle'),'catalog':[p['name'] for p in s['projects']],'context_enabled':s['desktop_context_enabled']}))
 
 with tempfile.TemporaryDirectory() as temporary:
     folder=Path(temporary)
@@ -117,12 +117,34 @@ app.run()
     # binary as a Python child can attribute event-posting access to the runner.
     pid_file=folder/'pixel-fixture.pid'
     process=subprocess.Popen(['/usr/bin/open','-n','-W',str(bundle),'--args',str(pid_file)])
+    def diagnose_synthetic_pixels():
+        # Read only this fabricated test window. No customer screenshots, chat,
+        # tokens, account pages or desktop-wide captures enter this diagnostic.
+        probe=folder/'OCRProbe.app';binary=probe/'Contents/MacOS/Probe'
+        binary.parent.mkdir(parents=True)
+        (probe/'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier':'local.dreamstime.ocrprobe','CFBundleExecutable':'Probe','CFBundleName':'CI OCR Probe','CFBundlePackageType':'APPL','LSUIElement':True}))
+        subprocess.run(['/usr/bin/xcrun','swiftc','-parse-as-library','native/ScreenContext.swift','tests/mac_ocr_probe.swift','-o',str(binary)],check=True)
+        subprocess.run(['/usr/bin/codesign','--sign','-','--force',str(probe)],check=True)
+        signed=subprocess.run(['/usr/bin/codesign','-d','-r-',str(probe)],capture_output=True,text=True,check=True)
+        requirement=next(line.split('designated => ',1)[1] for line in (signed.stdout+'\n'+signed.stderr).splitlines() if 'designated => ' in line)
+        probe_csreq=folder/'probe.csreq'
+        subprocess.run(['/usr/bin/csreq','-r-','-b',str(probe_csreq)],input=requirement,text=True,check=True)
+        for database in ['/Library/Application Support/com.apple.TCC/TCC.db',str(Path.home()/'Library/Application Support/com.apple.TCC/TCC.db')]:
+            subprocess.run(['sudo',python,str(grant),database,str(probe_csreq),'local.dreamstime.ocrprobe','0','2'],check=True)
+        output=Path('artifacts/native-release/ci-screen-fixture.json').resolve()
+        picture=Path('artifacts/native-release/ci-screen-fixture.png').resolve()
+        subprocess.run(['/usr/bin/open','-n','-g','-W',str(probe),'--args',pid_file.read_text(),str(output),str(picture)],check=True,timeout=45)
+        if output.exists():print('SYNTHETIC WINDOW OCR DIAGNOSTIC: '+output.read_text(),flush=True)
     try:
         def matched():
             assert process.poll() is None,'The CI mouse-event fixture exited before screenshot attribution'
             s=api('/api/snapshot');c=(s.get('current')or{}).get('context',{})
             return s if (s.get('current')or{}).get('project')=='fixture-3' and c.get('context_scope')=='screenshot' else None
-        snapshot=wait_for(matched)
+        try:snapshot=wait_for(matched)
+        except AssertionError:
+            try:diagnose_synthetic_pixels()
+            except Exception as diagnostic:print('Synthetic OCR probe failed: '+str(diagnostic),flush=True)
+            raise
         wait_for(lambda:api('/api/snapshot')['report']['totals'].get('fixture-3',0)>=initial+2)
         c=snapshot['current']['context'];health=snapshot['health']['collector']
         assert health['ax_trusted'] is False and health['screen_capture_permission'] is True
