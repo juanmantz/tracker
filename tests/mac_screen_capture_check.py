@@ -69,6 +69,9 @@ db.commit()
 import ApplicationServices
 let app=NSApplication.shared
 app.setActivationPolicy(.regular)
+if CommandLine.arguments.count>1 {
+    try! String(ProcessInfo.processInfo.processIdentifier).write(toFile:CommandLine.arguments[1],atomically:true,encoding:.utf8)
+}
 let menu=NSMenu(),item=NSMenuItem(),submenu=NSMenu()
 submenu.addItem(withTitle:"Quit",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
 item.submenu=submenu;menu.addItem(item);app.mainMenu=menu
@@ -110,7 +113,10 @@ app.run()
     for database in ['/Library/Application Support/com.apple.TCC/TCC.db',str(Path.home()/'Library/Application Support/com.apple.TCC/TCC.db')]:
         subprocess.run(['sudo',python,str(grant),database,str(fixture_csreq),'com.openai.chatgpt','2','0'],check=True)
     subprocess.run(['sudo','killall','tccd'],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    process=subprocess.Popen([str(executable)])
+    # LaunchServices gives the fixture its own TCC responsibility. Launching its
+    # binary as a Python child can attribute event-posting access to the runner.
+    pid_file=folder/'pixel-fixture.pid'
+    process=subprocess.Popen(['/usr/bin/open','-n','-W',str(bundle),'--args',str(pid_file)])
     try:
         def matched():
             assert process.poll() is None,'The CI mouse-event fixture exited before screenshot attribution'
@@ -127,5 +133,9 @@ app.run()
         assert card['source']=='screen_ocr' and card['labels']==['Fixture project 3'],card
         assert 'PRIVATE' not in json.dumps(c) and 'Fixture project 7' not in json.dumps(card)
         Path('artifacts/native-release/screen-capture-check.json').write_text(json.dumps({'real_window_pixels_ocr':True,'works_without_accessibility':True,'screen_permission_required':True,'setup_action_opened_settings':True,'collector_refreshed_automatically_after_setup':True,'sidebar_and_composer_excluded':True,'project':'fixture-3','measured_seconds_added_at_least':2,'images_stored':False,'full_ocr_text_retained':False,'screen_capture_count':health['screen_capture_count']}))
-    finally:process.terminate();process.wait(timeout=5)
+    finally:
+        if pid_file.exists():
+            try:os.kill(int(pid_file.read_text()),signal.SIGTERM)
+            except ProcessLookupError:pass
+        process.wait(timeout=5)
 print('Installed app OCRed real window pixels, excluded sidebar/draft and attributed actual seconds without Accessibility.')
