@@ -214,9 +214,12 @@ class DreamsSync:
                 self.tracker.set_setting('sync_error', None)
                 self.tracker.set_setting('auto_error_since', None)
                 collector = self.tracker.health.get('collector', {})
+                publication = self.tracker.setting('publication') or {}
+                has_context = bool(self.tracker.db.execute('SELECT 1 FROM context_snapshots LIMIT 1').fetchone())
                 profile = digest([__version__, collector.get('collector_bundle'),
                                   collector.get('collector_pid'), collector.get('ax_trusted'),
-                                  bool(self.tracker.health.get('accessibility'))])
+                                  bool(self.tracker.health.get('accessibility')), bool(self.tracker.setting('desktop_context_enabled', False)),
+                                  has_context, publication.get('week'), publication.get('state'), publication.get('published_hours')])
                 if (now - self.tracker.setting('last_heartbeat', 0) >= 900
                         or profile != self.tracker.setting('published_collector_profile')):
                     if self.coordination.publish(self.refresh(), now) is not False:

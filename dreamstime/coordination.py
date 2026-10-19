@@ -58,6 +58,12 @@ class Coordination:
             self.tracker.set_setting('applied_context_policy', policy)
             self.tracker.desktop_context = None
         valid = {p['id'] for p in self.tracker.setting('recognition_catalog', [])}
+        hints = []
+        for hint in control.get('review_hints', [])[:200] if isinstance(control.get('review_hints'), list) else []:
+            if (isinstance(hint, dict) and hint.get('kind') == 'collaborator' and hint.get('requires_session_evidence') is True
+                    and isinstance(hint.get('project'), str) and hint['project'] in valid
+                    and isinstance(hint.get('label'), str) and 3 <= len(hint['label'].strip()) <= 96):
+                hints.append({k:hint[k] for k in ('project','label')})
         decisions = []
         for d in control.get('decisions', [])[:2000] if isinstance(control.get('decisions'), list) else []:
             if (isinstance(d, dict) and isinstance(d.get('context'), str) and re.fullmatch(r'[a-f0-9]{64}', d['context'])
@@ -81,9 +87,10 @@ class Coordination:
             saved = {(d['context'], d['start'], d['end']): d for d in self.tracker.setting('auto_decisions', [])}
             saved.update({(d['context'], d['start'], d['end']): d for d in decisions})
             decisions = list(saved.values())
-            changed = (history != self.tracker.setting('focus_history', []) or decisions != self.tracker.setting('auto_decisions', [])
+            changed = (hints != self.tracker.setting('auto_review_hints', []) or history != self.tracker.setting('focus_history', []) or decisions != self.tracker.setting('auto_decisions', [])
                        or associations != previous_associations)
             self.tracker.set_setting('auto_associations', associations)
+            self.tracker.set_setting('auto_review_hints', hints)
             self.tracker.set_setting('focus_history', history)
             self.tracker.set_setting('auto_decisions', decisions)
             self.tracker.set_setting('cloud_reviewed_at', control.get('reviewed_at') if finite(control.get('reviewed_at')) else None)
@@ -143,6 +150,7 @@ class Coordination:
             'sensor': {k: health.get(k) for k in ('sensor','accessibility','last_sample','collector')},
             'last_save': self.tracker.setting('last_sync'), 'publication': self.tracker.setting('publication'), 'sync_error': self.tracker.setting('sync_error'),
             'local_review_at': self.tracker.setting('local_review_at'), 'context_storage': storage,
+            'context_capture_enabled': bool(self.tracker.setting('desktop_context_enabled', False)),
             'activities': [], 'snapshots': {}, 'omitted_groups': len(ordered), 'omitted_seconds': 0,
             'summarized_groups': summarized_groups,
             'unattributed_summary': sorted(summaries.values(), key=lambda r:(-r['seconds'],r['app'],r['day']))[:24],

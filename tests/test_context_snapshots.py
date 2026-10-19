@@ -41,12 +41,25 @@ class SnapshotTests(unittest.TestCase):
         second=context_key(self.t.current['context'])
         self.assertNotEqual(first,second)
         self.assertFalse(rememberable(self.t.current['context']))
-        self.assertIsNone(self.t.current['project'])
+        self.assertEqual(self.t.current['project'],'birch')
         self.assertEqual(self.t.recommendation(self.t.current['context'])['candidates'][0]['project'],'birch')
         self.t.set_setting('auto_decisions',[{'context':first,'project':'atlas','start':BASE,'end':BASE+4}])
         self.t.reclassify()
         self.assertEqual(self.t.report('2026-10-05')['totals']['atlas'],4)
+        self.assertEqual(self.t.current['project'],'birch')
+    def test_generic_chat_toolbar_is_not_promoted_to_current_conversation(self):
+        self.sample(0,context_snapshot=card('Atlas Studio',scope='document_header'))
         self.assertIsNone(self.t.current['project'])
+        self.assertFalse(rememberable(self.t.current['context']))
+    def test_specific_active_document_header_assigns_without_a_manual_button(self):
+        self.sample(0,app='com.figma.Desktop',app_name='Figma',title='Untitled',context_snapshot=card('Atlas Studio'))
+        self.assertEqual(self.t.current['project'],'atlas')
+    def test_window_metadata_keeps_preupgrade_specific_file_keys(self):
+        self.sample(0,app='com.figma.Desktop',app_name='Figma',title='Client storyboard')
+        before=context_key(self.t.current['context'])
+        self.sample(2,app='com.figma.Desktop',app_name='Figma',title='Client storyboard',
+                    context_snapshot=card('Client storyboard',kind='window',scope='window_metadata'))
+        self.assertEqual(context_key(self.t.current['context']),before)
     def test_legacy_context_keys_and_specific_file_associations_survive(self):
         old={'app':'com.figma.Desktop','identity':'','title':'Draft'}
         self.assertEqual(context_key(old),digest(['com.figma.Desktop','','Draft',[]]))

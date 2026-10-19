@@ -74,7 +74,7 @@ def context_key(context):
     values = [context.get(k, '') for k in ('app', 'identity', 'title')] + [
         sorted(h['project'] for h in context.get('project_hints', [])
                if isinstance(h, dict) and isinstance(h.get('project'), str))]
-    if context.get('snapshot_id'):
+    if context.get('snapshot_id') and context.get('snapshot_scope') != 'window_metadata':
         values.append(context['snapshot_id'])
     return digest(values)
 
@@ -268,8 +268,15 @@ class Tracker:
             return result
         # Only text extracted from a recognized conversation pane can assign by
         # a unique project mention. Whole-window/sidebar text remains a suggestion.
-        if context.get('context_scope') == 'conversation' and len(result['candidates']) == 1:
-            return {'project': result['candidates'][0]['project'], 'confidence': 'high', 'reason': 'Project in the current conversation', 'candidates': result['candidates']}
+        if context.get('context_scope') in ('conversation', 'document_header', 'conversation_header') and len(result['candidates']) == 1:
+            reason = 'Project in the current conversation' if context['context_scope'] == 'conversation' else 'Project in the active document header'
+            return {'project': result['candidates'][0]['project'], 'confidence': 'high', 'reason': reason, 'candidates': result['candidates']}
+        if context.get('activity_kind') == 'call' and context.get('call_session'):
+            title = ' '+normalize(context.get('title', ''))+' '
+            collaborators = {hint['project'] for hint in self.setting('auto_review_hints', [])
+                if hint['project'] in valid and ' '+normalize(hint['label'])+' ' in title}
+            if len(collaborators) == 1:
+                return {'project': next(iter(collaborators)), 'confidence': 'reviewed', 'reason': 'Known collaborator in a connected call', 'candidates': []}
         if at is not None and (context.get('app') in FOCUS_APPS or context.get('activity_kind') == 'call'):
             focus = next((f for f in reversed(self.setting('focus_history', [])) if f['at'] <= at), None)
             if focus and focus['project'] in valid:
@@ -377,13 +384,18 @@ class Tracker:
                 context["excluded"] = True
         if context["excluded"]:
             context.update(title="", url="", identity="", document="")
-        elif not sample.get('locked') and self.setting('desktop_context_enabled', True):
+        elif not sample.get('locked') and self.setting('desktop_context_enabled', True) and not is_noise_context(context):
             if verified_call(sample):
                 context.update(activity_kind='call', call_session=sample['call_session'])
             snapshot = self.context_snapshots.put(sample.get('context_snapshot'), sample['ts'])
             if snapshot:
-                context['snapshot_id'] = snapshot
                 card = self.context_snapshots.get(snapshot)
+                if card:
+                    context['snapshot_id'] = snapshot
+                    context['snapshot_scope'] = card['scope']
+                if card and (card['scope'] == 'conversation_header' or (card['scope'] == 'document_header' and
+                        app not in ('com.openai.chat', 'com.openai.chatgpt', 'com.openai.codex'))):
+                    context.setdefault('context_scope', card['scope'])
                 if card and card['labels']:
                     suggested = recognize(context, self.setting('recognition_catalog', []), snippets=card['labels'])
                     ids = {x['project'] for x in context.get('project_hints', [])}
@@ -437,7 +449,7 @@ class Tracker:
         self.previous = current
         self.current = current
         self.health.update(sensor="connected", accessibility=sample.get("accessibility", False), last_sample=ts)
-        self.health["collector"] = {k: sample[k] for k in ("collector_bundle", "collector_pid", "ax_trusted", "window_access_status", "permission_repair") if k in sample}
+        self.health["collector"] = {k: sample[k] for k in ("collector_bundle", "collector_pid", "ax_trusted", "window_access_status", "permission_repair", "context_enabled", "context_capture_state") if k in sample}
         self.health['input'] = {k: round(sample[k], 1) for k in ('mouse_idle', 'keyboard_idle') if isinstance(sample.get(k), (int, float)) and math.isfinite(sample[k]) and sample[k] >= 0}
         return True
 

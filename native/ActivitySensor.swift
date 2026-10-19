@@ -30,6 +30,7 @@ func startNativeActivitySensor(requestPermission: Bool = false,
     let editable: Set<String> = ["AXTextField", "AXTextArea", "AXSecureTextField", "AXComboBox", "AXOutline"]
     var callSessions: [String: String] = [:]
     var snapshotCache: (key: String, at: Double, card: [String: Any]?)?
+    var preparedApplications = Set<pid_t>()
 
     func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
         AXUIElementSetMessagingTimeout(element, 0.025)
@@ -38,6 +39,10 @@ func startNativeActivitySensor(requestPermission: Bool = false,
     }
     func text(_ element: AXUIElement, _ name: String) -> String {
         return attribute(element, name) as? String ?? ""
+    }
+    func elementValue(_ value: CFTypeRef?) -> AXUIElement? {
+        guard let value = value, CFGetTypeID(value) == AXUIElementGetTypeID() else { return nil }
+        return unsafeBitCast(value, to: AXUIElement.self)
     }
     func children(_ element: AXUIElement) -> [AXUIElement] {
         return attribute(element, "AXChildren") as? [AXUIElement] ?? []
@@ -77,7 +82,14 @@ func startNativeActivitySensor(requestPermission: Bool = false,
             }
             if depth < 8 { queue.append(contentsOf: children(node).prefix(30).map { ($0, depth + 1, inToolbar, inMain) }) }
         }
-        guard !labels.isEmpty else { return nil }
+        if labels.isEmpty {
+            let windowTitle = title.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+            let appTitle = NSWorkspace.shared.runningApplications.first(where: { $0.bundleIdentifier == bundle })?.localizedName ?? ""
+            guard !windowTitle.isEmpty, !generic.contains(windowTitle.lowercased()),
+                  windowTitle.caseInsensitiveCompare(appTitle) != .orderedSame else { return nil }
+            return ["schema": "dreamstime/context/v1", "kind": "window", "scope": "window_metadata",
+                    "labels": [String(windowTitle.prefix(96))]]
+        }
         return ["schema": "dreamstime/context/v1", "kind": chatApps.contains(bundle) ? "conversation" : "document",
                 "scope": mainHeader ? "conversation_header" : "document_header", "labels": labels]
     }
@@ -146,11 +158,34 @@ func startNativeActivitySensor(requestPermission: Bool = false,
     var lastConversationAt = 0.0
     // Only promote text from an explicitly identified conversation/main region.
     // A whole-window scan may contain unrelated chats in the sidebar.
-    func conversationPane(_ root: AXUIElement) -> AXUIElement? {
+    func conversationPane(_ root: AXUIElement, focused: AXUIElement?) -> AXUIElement? {
+        func isNavigation(_ node: AXUIElement) -> Bool {
+            let description = text(node, "AXDescription").lowercased()
+            let identifier = text(node, "AXIdentifier").lowercased()
+            let subrole = text(node, "AXSubrole")
+            return ["AXLandmarkNavigation", "AXLandmarkComplementary"].contains(subrole) ||
+                ["sidebar", "navigation", "chat history"].contains(where: { description.contains($0) || identifier.contains($0) })
+        }
+        func isConversation(_ node: AXUIElement) -> Bool {
+            if isNavigation(node) { return false }
+            return text(node, "AXSubrole") == "AXLandmarkMain" || text(node, "AXRole") == "AXLandmarkMain" ||
+                ["conversation", "chat messages", "main content"].contains(text(node, "AXDescription").lowercased()) ||
+                ["conversation", "main-content", "conversation-pane"].contains(text(node, "AXIdentifier").lowercased())
+        }
+        // The focused composer is often deeply nested. Walk only its parents
+        // to find an explicitly marked main region; never infer a whole window.
+        var ancestor = focused
+        var parents = Set<CFHashCode>()
+        for _ in 0..<24 {
+            guard let node = ancestor, parents.insert(CFHash(node)).inserted else { break }
+            if isNavigation(node) { break }
+            if isConversation(node) { return node }
+            ancestor = elementValue(attribute(node, "AXParent"))
+        }
         var queue: [AXUIElement] = [root]
-        let deadline = Date().timeIntervalSince1970 + 0.15
+        let deadline = Date().timeIntervalSince1970 + 0.3
         var visited = 0
-        while !queue.isEmpty && visited < 80 && Date().timeIntervalSince1970 < deadline {
+        while !queue.isEmpty && visited < 240 && Date().timeIntervalSince1970 < deadline {
             let node = queue.removeFirst()
             visited += 1
             AXUIElementSetMessagingTimeout(node, 0.04)
@@ -158,6 +193,8 @@ func startNativeActivitySensor(requestPermission: Bool = false,
             _ = AXUIElementCopyAttributeValue(node, kAXRoleAttribute as CFString, &roleValue)
             let role = roleValue as? String ?? ""
             if ["AXTextField", "AXTextArea", "AXSecureTextField", "AXComboBox", "AXOutline", "AXToolbar"].contains(role) { continue }
+            if isNavigation(node) { continue }
+            if isConversation(node) { return node }
             var subrole: CFTypeRef?
             _ = AXUIElementCopyAttributeValue(node, kAXSubroleAttribute as CFString, &subrole)
             if subrole as? String == "AXLandmarkMain" { return node }
@@ -185,7 +222,12 @@ func startNativeActivitySensor(requestPermission: Bool = false,
             let role = roleValue as? String ?? ""
             // Do not traverse editable controls: drafts never become context.
             if ["AXTextField", "AXTextArea", "AXSecureTextField", "AXComboBox", "AXOutline", "AXToolbar"].contains(role) { continue }
-            if role == "AXStaticText" {
+            let subrole = text(node, "AXSubrole")
+            let description = text(node, "AXDescription").lowercased()
+            let identifier = text(node, "AXIdentifier").lowercased()
+            if ["AXLandmarkNavigation", "AXLandmarkComplementary"].contains(subrole) ||
+                ["sidebar", "navigation", "chat history"].contains(where: { description.contains($0) || identifier.contains($0) }) { continue }
+            if role == "AXStaticText" || role == "AXHeading" {
                 var value: CFTypeRef?
                 _ = AXUIElementCopyAttributeValue(node, kAXValueAttribute as CFString, &value)
                 if let text = value as? String, !text.isEmpty { output.append(String(text.prefix(1000))) }
@@ -220,8 +262,16 @@ func startNativeActivitySensor(requestPermission: Bool = false,
         var document = ""
         var windowAccessStatus = "not_requested"
         var focusedWindow: AXUIElement?
+        var focusedElement: AXUIElement?
         if !locked, let pid = foreground?.processIdentifier, !browsers.contains(bundle), !excluded.contains(bundle) {
             let element = AXUIElementCreateApplication(pid)
+            if trusted && contextEnabled() && (chatApps.contains(bundle) ||
+                ["com.figma.Desktop", "com.tinyspeck.slackmacgap"].contains(bundle)) && preparedApplications.insert(pid).inserted {
+                // Electron applications may not build their Accessibility tree
+                // until an assistive client asks. This never grants OS access.
+                _ = AXUIElementSetAttributeValue(element, "AXManualAccessibility" as CFString, kCFBooleanTrue)
+                _ = AXUIElementSetAttributeValue(element, "AXEnhancedUserInterface" as CFString, kCFBooleanTrue)
+            }
             AXUIElementSetMessagingTimeout(element, 0.2)
             var value: CFTypeRef?
             let result = AXUIElementCopyAttributeValue(element, kAXFocusedWindowAttribute as CFString, &value)
@@ -232,6 +282,9 @@ func startNativeActivitySensor(requestPermission: Bool = false,
                 title = text(window, "AXTitle")
                 let location = attribute(window, "AXDocument")
                 document = location as? String ?? (location as? URL)?.absoluteString ?? ""
+                if chatApps.contains(bundle) {
+                    focusedElement = elementValue(attribute(element, "AXFocusedUIElement"))
+                }
             }
         }
         var snapshot: [String: Any]?
@@ -267,19 +320,28 @@ func startNativeActivitySensor(requestPermission: Bool = false,
         var conversationText = ""
         if !locked && idle < 120 && callID == nil && contextEnabled() &&
             chatApps.contains(bundle) && now - lastConversationAt >= 10,
-            let window = focusedWindow, let pane = conversationPane(window) {
+            let window = focusedWindow, let pane = conversationPane(window, focused: focusedElement) {
             // Compare only the current conversation locally. The backend retains
             // project-ID hints; it never stores or uploads this text.
             conversationText = visibleText(pane)
             lastConversationAt = now
         }
+        var captureState = "no_specific_context"
+        if !contextEnabled() { captureState = "disabled" }
+        else if locked { captureState = "locked" }
+        else if !trusted { captureState = "permission_required" }
+        else if browsers.contains(frontBundle) { captureState = "browser_companion_required" }
+        else if !conversationText.isEmpty { captureState = "current_conversation" }
+        else if snapshot != nil { captureState = snapshot?["scope"] as? String == "window_metadata" ? "window_metadata" : "compact_header" }
+        else if chatApps.contains(bundle) { captureState = "conversation_region_unavailable" }
         var event: [String: Any] = ["ts": now, "mono": ProcessInfo.processInfo.systemUptime,
             "app": bundle, "app_name": appName, "title": title, "document": document,
             "idle": idle, "mouse_idle": mouseIdle.isFinite ? mouseIdle : idle,
             "keyboard_idle": keyboardIdle.isFinite ? keyboardIdle : idle, "locked": locked,
             "accessibility": trusted || (windowAccessStatus == "readable" && foreground?.processIdentifier != ProcessInfo.processInfo.processIdentifier), "ax_trusted": trusted,
             "window_access_status": windowAccessStatus, "collector_bundle": Bundle.main.bundleIdentifier ?? "standalone",
-            "collector_pid": ProcessInfo.processInfo.processIdentifier]
+            "collector_pid": ProcessInfo.processInfo.processIdentifier,
+            "context_enabled": contextEnabled(), "context_capture_state": captureState]
         if !conversationText.isEmpty {
             event["desktop_context"] = conversationText
             event["context_scope"] = "conversation"

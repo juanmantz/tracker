@@ -49,12 +49,21 @@ class AutomaticTests(unittest.TestCase):
             collector={'collector_bundle':'local.dreamstime.companion','collector_pid':123,'ax_trusted':True})
         self.tick(60)
         self.assertEqual(self.app.tracker.setting('last_heartbeat'), BASE+60)
+
         self.assertGreater(self.app.tracker.setting('last_heartbeat'), first)
         report = next(json.loads(n['fields']['notes']) for n in self.provider.map['nodes']
                       if n.get('kind')=='note' and json.loads(n['fields'].get('notes','{}')).get('schema')==REVIEW_SCHEMA)
         self.assertEqual(report['sensor']['collector']['collector_bundle'],'local.dreamstime.companion')
         self.tick(120)
         self.assertEqual(self.app.tracker.setting('last_heartbeat'), BASE+60)
+
+    def test_first_context_capture_is_reported_on_the_next_automatic_tick(self):
+        self.connect();self.control(context_policy={'schema':'dreamstime/context/v1','enabled':True});self.tick(0)
+        self.samples(2,4,app='com.figma.Desktop',app_name='Figma',title='Untitled',
+            context_snapshot={'schema':'dreamstime/context/v1','kind':'document','scope':'document_header','labels':['Atlas Studio']})
+        self.assertEqual(self.app.tracker.current['project'],'atlas')
+        self.tick(60)
+        self.assertEqual(self.app.tracker.setting('last_heartbeat'),BASE+60)
 
     def test_unattended_eight_hour_day_project_changes_idle_offline_and_daily_correction(self):
         self.connect()

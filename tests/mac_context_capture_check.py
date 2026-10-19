@@ -44,6 +44,7 @@ with tempfile.TemporaryDirectory() as directory:
     source.write_text("""
 import AppKit
 import Foundation
+import WebKit
 let app=NSApplication.shared
 app.setActivationPolicy(.regular)
 let mode=CommandLine.arguments.last ?? "document"
@@ -55,7 +56,23 @@ item.submenu=submenu;menu.addItem(item);app.mainMenu=menu
 let window=NSWindow(contentRect:NSRect(x:150,y:150,width:600,height:400),
                     styleMask:[.titled,.closable],backing:.buffered,defer:false)
 window.isReleasedWhenClosed=false
-window.title=mode=="call" ? "Fixture podcast partner - WhatsApp video call" : "Untitled"
+window.title=mode=="call" ? "Fixture podcast partner - WhatsApp video call" : (mode=="conversation" ? "ChatGPT" : (mode=="metadata" ? "Fixture project 4 board" : "Untitled"))
+var webDelegate: NSObject?
+if mode=="conversation" {
+    class Ready: NSObject, WKNavigationDelegate {
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            DispatchQueue.main.asyncAfter(deadline:.now()+1) { webView.evaluateJavaScript("document.getElementById('prompt').focus()",completionHandler:nil) }
+        }
+    }
+    let web=WKWebView(frame:window.contentView!.bounds)
+    web.autoresizingMask=[.width,.height]
+    let ready=Ready();webDelegate=ready;web.navigationDelegate=ready
+    window.contentView!.addSubview(web)
+    let history=String(repeating:"<div>Fixture project 7 - unrelated history</div>",count:120)
+    let before=String(repeating:"<div>",count:35),after=String(repeating:"</div>",count:35)
+    web.loadHTMLString("<html><body><aside aria-label='sidebar'>"+history+"</aside>"+before+"<main aria-label='conversation'><h1>Fixture project 3</h1><p>Current storyboard discussion.</p><textarea id='prompt'>PRIVATE DRAFT MUST NEVER ENTER SNAPSHOTS</textarea></main>"+after+"</body></html>",baseURL:nil)
+}
+if mode != "conversation" && mode != "metadata" {
 let header=NSTextField(labelWithString:mode=="call" ? "00:03" : "Fixture project 3 - storyboard")
 header.frame=NSRect(x:25,y:300,width:500,height:30)
 if mode != "call" { header.setAccessibilityIdentifier("document-title");header.setAccessibilityLabel("Document title") }
@@ -68,6 +85,7 @@ if mode=="call" {
 let draft=NSTextField(string:"PRIVATE DRAFT MUST NEVER ENTER SNAPSHOTS")
 draft.frame=NSRect(x:25,y:80,width:500,height:30)
 window.contentView!.addSubview(draft)
+}
 window.makeKeyAndOrderFront(nil)
 app.activate(ignoringOtherApps:true)
 app.run()
@@ -98,6 +116,22 @@ app.run()
             return card if card and any('Fixture project 3' in label for label in card['labels']) else None
         card=wait_for(metadata)
         assert 'PRIVATE DRAFT' not in json.dumps(card)
+        conversation=launch('CI Conversation','com.openai.chatgpt','conversation')
+        try:
+            def matched_conversation():
+                value=current() or {}
+                return value if value.get('project')=='fixture-3' and value.get('context',{}).get('context_scope')=='conversation' else None
+            active=wait_for(matched_conversation)
+            assert active['project']!='fixture-7','Sidebar history won over the current conversation'
+            assert 'PRIVATE DRAFT' not in json.dumps(active['context'])
+        finally:
+            conversation.terminate();conversation.wait(timeout=5)
+        metadata_app=launch('CI Metadata','local.dreamstime.metadatafixture','metadata')
+        try:
+            value=wait_for(lambda: context() if context().get('snapshot_scope')=='window_metadata' and current().get('project')=='fixture-4' else None)
+            assert stored(value['snapshot_id'])['scope']=='window_metadata'
+        finally:
+            metadata_app.terminate();metadata_app.wait(timeout=5)
         call=launch('CI Call','net.whatsapp.WhatsApp','call')
         try:
             captured=wait_for(lambda:context() if context().get('activity_kind')=='call' else None)
@@ -118,6 +152,8 @@ app.run()
             'real_document_header_captured':True,'editable_draft_excluded':True,
             'connected_call_detected':True,'background_call_session_preserved':True,
             'ended_call_stopped':True,'single_collector_after_reopen':True,
+            'deep_webkit_conversation_assigned':True,'sidebar_history_excluded':True,
+            'specific_window_metadata_captured':True,
             'compressed_snapshot_bytes':bytes_used,'raw_images_stored':False}))
     finally:
         document.terminate();document.wait(timeout=5)
