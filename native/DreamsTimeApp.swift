@@ -10,6 +10,7 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
     var loading: NSTextField!
     var background = CommandLine.arguments.contains("--background")
     var permissionPrompted = false
+    var screenPrompted = false
     var permissionRepairInProgress = false
     var permissionSettingsSeen = false
     var permissionRepairStarted: Double = 0
@@ -136,6 +137,12 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
                     self.consecutiveFailures = 0
                     self.nativePaused = settings["paused"] as? Bool ?? true
                     self.desktopContextEnabled = settings["desktop_context_enabled"] as? Bool ?? false
+                    if !self.background && self.desktopContextEnabled && !self.screenPrompted && !CGPreflightScreenCaptureAccess() {
+                        self.screenPrompted = true
+                        // A visible setup action is available if the owner has
+                        // dismissed the system prompt. Background starts stay quiet.
+                        if !UserDefaults.standard.bool(forKey: "screenCaptureRequested") { self.requestScreenAccess() }
+                    }
                 } else {
                     self.consecutiveFailures += 1
                     if self.consecutiveFailures >= 2 { self.startService() }
@@ -164,10 +171,8 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
     @objc func showWindow() {
         background = false
         NSApp.setActivationPolicy(.regular)
-        if !smokeTest && !permissionPrompted && !AXIsProcessTrusted() {
-            permissionPrompted = true
-            repairAccess(automatic: true)
-        }
+        // Do not reset Accessibility on every app update. Screen OCR can work
+        // independently; an explicit repair action remains in Settings.
         window?.makeKeyAndOrderFront(nil)
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -201,6 +206,19 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
         _ = AXIsProcessTrustedWithOptions(options)
         if let settings = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
             NSWorkspace.shared.open(settings)
+        }
+    }
+
+    func requestScreenAccess() {
+        guard !smokeTest else { return }
+        UserDefaults.standard.set(true, forKey: "screenCaptureRequested")
+        DispatchQueue.global().async {
+            let granted = CGRequestScreenCaptureAccess()
+            DispatchQueue.main.async {
+                if !granted, let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
         }
     }
 
@@ -288,6 +306,7 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
         case "repair-access":
             if AXIsProcessTrusted() { requestCurrentAppAccess() } else { repairAccess() }
         case "restart-collector": restartCollector()
+        case "screen-access": requestScreenAccess()
         case "open-url":
             if let raw = body["url"], let url = URL(string: raw), url.scheme == "https", url.host == "dreams.checklists.workers.dev" { NSWorkspace.shared.open(url) }
         case "copy":

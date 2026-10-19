@@ -8,6 +8,8 @@ def recording_status(tracker, now, *, enabled, running, error=None, samples=0):
     current = snap['current']
     last = snap['health']['last_sample']
     age = None if last is None else max(0, now-last)
+    collector = snap['health'].get('collector', {})
+    screen_ready = collector.get('screen_capture_permission') is True and collector.get('context_enabled') is True
     with tracker.lock:
         zone = ZoneInfo(tracker.timezone)
         day = datetime.fromtimestamp(now, zone).date()
@@ -27,7 +29,7 @@ def recording_status(tracker, now, *, enabled, running, error=None, samples=0):
     elif not running:
         state, detail = 'failed', 'The capture process stopped. Restart capture.'
     elif (current and current['active'] and snap['health'].get('collector', {}).get('ax_trusted') is False
-          and not snap['health'].get('accessibility')):
+          and not snap['health'].get('accessibility') and not screen_ready):
         state, detail = 'permission_required', 'App time is recorded, but macOS is blocking document access. Repair access to identify projects.'
     elif current and current['active']:
         state, detail = 'recording', ('A connected call is being timed, including listening time.' if current['context'].get('activity_kind') == 'call' else 'Actual foreground activity is being saved.')
@@ -39,5 +41,5 @@ def recording_status(tracker, now, *, enabled, running, error=None, samples=0):
         state, detail = 'excluded', 'This activity is excluded from recording.'
     else:
         state, detail = 'locked', 'The Mac session is locked or inactive. No time is being added.'
-    project_detection = 'permission_required' if snap['health'].get('collector', {}).get('ax_trusted') is False and not snap['health'].get('accessibility') else 'ready' if snap['health'].get('accessibility') else 'unverified'
+    project_detection = 'screen_ocr' if screen_ready else 'permission_required' if collector.get('ax_trusted') is False and not snap['health'].get('accessibility') else 'ready' if snap['health'].get('accessibility') else 'unverified'
     return {'project_detection':project_detection, 'state':state, 'detail':detail, 'today_seconds':today, 'sample_count':samples, 'last_sample_age_seconds':None if age is None else round(age, 1), 'process_running':running}

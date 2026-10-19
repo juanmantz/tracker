@@ -48,7 +48,9 @@ jobs:
       - name: Build native universal app and installer
         run: bash scripts/build-installer-mac.sh
       - name: Start the prior service with saved history before upgrading
-        run: python3 tests/mac_upgrade_check.py prepare
+        run: |
+          defaults write local.dreamstime.companion screenCaptureRequested -bool true
+          python3 tests/mac_upgrade_check.py prepare
       - name: Install using macOS Installer and open the real native window
         run: |
           python3 - <<'PY'
@@ -67,7 +69,7 @@ jobs:
           python3 - <<'PY'
           import json
           h=json.load(open('artifacts/native-release/health.json'))
-          assert h['app']=='dreams-time' and h['version']=='0.10.1' and h['capture_host']=='app'
+          assert h['app']=='dreams-time' and h['version']=='0.11.0' and h['capture_host']=='app'
           s=json.load(open('artifacts/native-release/native-sample.json'))
           assert isinstance(s['app'],str) and s['idle']>=0 and isinstance(s['accessibility'],bool)
           import time, urllib.request
@@ -98,11 +100,13 @@ jobs:
         run: python3 tests/mac_ax_capture_check.py
       - name: Verify compact context, background call capture and a single app instance
         run: python3 tests/mac_context_capture_check.py
+      - name: Prove real foreground screenshots, OCR and measured project time without Accessibility
+        run: python3 tests/mac_screen_capture_check.py
       - name: Verify the real installed native app icon
         run: python3 tests/mac_app_icon_check.py
       - uses: actions/upload-artifact@v4
         with:
-          name: Dreams-Time-0.10.1-Update
+          name: Dreams-Time-0.11.0-Update
           path: artifacts/native-release/Dreams-Time-Update.pkg
           compression-level: 0
       - name: Split download into manageable artifacts
@@ -139,6 +143,7 @@ jobs:
             artifacts/native-release/autonomy-check.json
             artifacts/native-release/ax-capture-check.json
             artifacts/native-release/context-check.json
+            artifacts/native-release/screen-capture-check.json
             artifacts/native-release/icon-check.json
             artifacts/native-release/installed-icon.png
       - name: Publish direct installer downloads after successful Mac verification
@@ -148,16 +153,16 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          Path("artifacts/native-release/release-notes.txt").write_text("Dreams Time 0.10.1 reads explicit active-document headers automatically, finds focused conversation regions through deep Accessibility trees and requests Electron Accessibility trees when available. Sidebar history and editable drafts remain excluded. Specific window metadata retains prior learned file keys. Owner-confirmed collaborator hints apply only to verified connected calls, never generic chat windows. The first captured context and publication-state changes are reported on the next automatic tick. Whole-hour flooring, retained partial time, stable weekly totals, retry/readback verification, history and sign-in are preserved.\n\nExisting installations: Dreams-Time-Update.pkg. The native app remains ad-hoc signed; macOS may require one Accessibility approval after this update. The app repairs only its own stale access request if necessary.\n")
+          Path("artifacts/native-release/release-notes.txt").write_text("Dreams Time 0.11.0 adds actual foreground-window screenshots with on-device OCR on macOS 14+. Allow Screen Recording once in the app. No external AI key is needed. Images and full OCR text are immediately discarded; only compact project matches are retained. ChatGPT sidebar history and the bottom composer are excluded before OCR. A unique project match assigns only measured active time. Ambiguous context remains unassigned. Screenshot detection works independently of Accessibility permission.\n\nThe installer preserves project recognition, measured history and sign-in. Completed whole project hours publish automatically, with readback verification and no duplicate weekly records. No historical hours are invented. The app remains ad-hoc signed; macOS controls permission approval.\n")
           PY
           LATEST_BUILD="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq '.object.sha')"
           if [[ "$LATEST_BUILD" != "$GITHUB_SHA" ]]; then
             echo "A newer build superseded this run; no download published."
             exit 0
           fi
-          if gh release view v0.10.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Version 0.10.1 is already released; keeping its installer immutable."
+          if gh release view v0.11.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Version 0.11.0 is already released; keeping its installer immutable."
             exit 0
           fi
-          gh release create v0.10.1 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dreams Time 0.10.1" --notes-file artifacts/native-release/release-notes.txt
-          gh release upload v0.10.1 --repo "$GITHUB_REPOSITORY" artifacts/native-release/Dreams-Time-Update.pkg artifacts/native-release/Dreams-Time-Installer.pkg artifacts/app-icon/Dreams-Time-Icon.png artifacts/app-icon/Dreams-Time-Icon-128.png
+          gh release create v0.11.0 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dreams Time 0.11.0" --notes-file artifacts/native-release/release-notes.txt
+          gh release upload v0.11.0 --repo "$GITHUB_REPOSITORY" artifacts/native-release/Dreams-Time-Update.pkg artifacts/native-release/Dreams-Time-Installer.pkg artifacts/app-icon/Dreams-Time-Icon.png artifacts/app-icon/Dreams-Time-Icon-128.png

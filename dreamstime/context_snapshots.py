@@ -15,7 +15,7 @@ CALL_APPS = frozenset({'net.whatsapp.WhatsApp', 'com.whatsapp.WhatsApp',
     'us.zoom.xos', 'com.apple.FaceTime', 'com.microsoft.teams', 'com.microsoft.teams2',
     'com.tinyspeck.slackmacgap'})
 KINDS = {'document', 'conversation', 'call', 'window'}
-SCOPES = {'window_metadata', 'document_header', 'conversation_header', 'call_controls'}
+SCOPES = {'window_metadata', 'document_header', 'conversation_header', 'call_controls', 'screen_project'}
 
 def encoded(value):
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':')).encode('utf-8')
@@ -45,7 +45,7 @@ def compact_card(value):
             break
     if not labels and kind != 'call':
         return None
-    result = {'kind': kind, 'scope': scope, 'source': 'accessibility', 'labels': sorted(labels, key=str.casefold)}
+    result = {'kind': kind, 'scope': scope, 'source': 'screen_ocr' if scope == 'screen_project' else 'accessibility', 'labels': sorted(labels, key=str.casefold)}
     if kind == 'call':
         result['state'] = 'connected' if value.get('state') == 'connected' else 'uncertain'
     while len(encoded(result)) > MAX_CARD_BYTES and result['labels']:

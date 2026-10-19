@@ -33,7 +33,7 @@ class DreamsSync:
                 'action_required': 'sign-in' if 'sign-in expired' in (self.tracker.setting('sync_error') or '') else None,
                 'last': self.tracker.setting('last_sync'), 'error': self.tracker.setting('sync_error'),
                 'publication': self.tracker.setting('publication'),
-                'context_access': ('denied' if self.tracker.health.get('collector', {}).get('ax_trusted') is False and not self.tracker.health.get('accessibility') else 'allowed' if self.tracker.health.get('accessibility') else 'unknown'),
+                'context_access': ('allowed' if self.tracker.health.get('collector', {}).get('screen_capture_permission') is True or self.tracker.health.get('accessibility') else 'denied' if self.tracker.health.get('collector', {}).get('ax_trusted') is False else 'unknown'),
                 'pending': bool(self.tracker.setting('pending_sync')), 'weeks': list(self.tracker.setting('synced_weeks', {}))}
 
     def refresh(self):
@@ -218,6 +218,7 @@ class DreamsSync:
                 has_context = bool(self.tracker.db.execute('SELECT 1 FROM context_snapshots LIMIT 1').fetchone())
                 profile = digest([__version__, collector.get('collector_bundle'),
                                   collector.get('collector_pid'), collector.get('ax_trusted'),
+                                  collector.get('screen_capture_permission'), collector.get('screen_capture_state') == 'readable',
                                   bool(self.tracker.health.get('accessibility')), bool(self.tracker.setting('desktop_context_enabled', False)),
                                   has_context, publication.get('week'), publication.get('state'), publication.get('published_hours')])
                 if (now - self.tracker.setting('last_heartbeat', 0) >= 900

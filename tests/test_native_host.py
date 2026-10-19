@@ -64,3 +64,16 @@ class NativeHostTests(unittest.TestCase):
         self.assertFalse(self.app.accept_native_sample({'heartbeat':True})['paused'])
         self.app.accept_native_sample(self.sample())
         self.assertEqual(self.app.sample_count,1)
+
+    def test_screen_context_can_identify_work_when_accessibility_is_denied(self):
+        self.app.tracker.import_projects({'revision':1,'nodes':[{'id':'hey','name':'Hey, transform','kind':'project','fields':{}}],'edges':[]})
+        self.app.tracker.set_setting('desktop_context_enabled',True)
+        self.app.start_sensor()
+        self.app.accept_native_sample(self.sample(app='com.openai.chatgpt',title='ChatGPT',
+            accessibility=False,ax_trusted=False,window_access_status='ax_error_-25211',
+            context_enabled=True,screen_capture_permission=True,screen_capture_state='readable',
+            screen_context_at=time.time(),screen_context='Hey, transform'))
+        snap=self.app.snapshot()
+        self.assertEqual(snap['current']['project'],'hey')
+        self.assertEqual(snap['recording']['project_detection'],'screen_ocr')
+        self.assertNotEqual(snap['recording']['state'],'permission_required')

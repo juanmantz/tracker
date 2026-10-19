@@ -72,7 +72,9 @@ function render(data){
   $('#save-note').textContent=r.state==='browser_unavailable'?'Use a desktop work app for a few seconds to see this number increase.':r.state==='recording'?'This number increases as work is recorded.':'This is saved time. It will increase when activity is recorded.';
   $('#last-update').textContent=['failed','stale','off'].includes(r.state)?'No new time is being recorded.':r.state==='paused'?'Tracking stays paused until you resume.':r.last_sample_age_seconds===null?'No activity received yet.':r.last_sample_age_seconds<=4?'Activity updated just now.':`Last activity received ${Math.round(r.last_sample_age_seconds)} seconds ago.`;
   $('#live-check').hidden=['failed','stale','off','paused','starting','permission_required'].includes(r.state);
-  $('#window-permission').hidden=!(['recording','permission_required'].includes(r.state)&&!data.health.accessibility);
+  const screen=data.health.collector||{};
+  $('#screen-permission').hidden=!data.desktop_context_enabled||screen.screen_capture_permission!==false;
+  $('#window-permission').hidden=!(['recording','permission_required'].includes(r.state)&&!data.health.accessibility&&screen.screen_capture_permission!==true);
   const current=data.current?.context,projects=Object.fromEntries(data.projects.map(p=>[p.id,p.name]));
   $('#current-label').textContent=r.state==='recording'?'Currently using':'Last detected app';
   $('#current-app').textContent=current?.app_name||'Nothing detected yet';
@@ -120,7 +122,8 @@ function renderProjects(data,names){
   $('#sync-status').textContent=automaticStatus(d);
 }
 function renderSettings(data,names){
-  $('#accessibility-status').textContent=data.health.accessibility?'Window access is allowed. File and conversation names can be detected.':'Window context is unavailable. If Dreams Time is already enabled in macOS, the collector needs to reconnect.';
+  const screen=data.health.collector||{};
+  $('#accessibility-status').textContent=screen.screen_capture_permission===true?`Screen capture allowed. ${screen.screen_capture_count||0} windows read this session. Capture: ${screen.screen_capture_state||'waiting'}. Images and full OCR text are discarded.`:data.health.accessibility?'Document access is allowed. Screen Recording is needed for screenshot context.':'Document access and screen context are unavailable. Allow Screen Recording on the tracking screen.';
   $('#desktop-optin').checked=!!data.desktop_context_enabled;
   const dreams=data.dreams||{};
   $('#dreams-status').textContent=automaticStatus(dreams);
@@ -165,6 +168,7 @@ async function toggleTracking(){
 }
 function download(name,data){if(nativeBridge){nativeBridge.postMessage({type:'download',name,content:JSON.stringify(data,null,2)});return;}const anchor=make('a'),url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));anchor.href=url;anchor.download=name;anchor.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 async function importFile(event,path,key,text){const file=event.target.files[0];if(!file)return;if(file.size>30*1024*1024)throw new Error('Choose a JSON file smaller than 30 MB.');const result=await api(path,{[key]:JSON.parse(await file.text())});event.target.value='';message(text(result));await refresh();}
+$('#allow-screen').addEventListener('click',()=>{if(nativeBridge)nativeBridge.postMessage({type:'screen-access'});else message('Open the installed Dreams Time app to allow Screen Recording.',true);});
 async function openPermission(){if(nativeBridge){nativeBridge.postMessage({type:'repair-access'});return;}await api('/api/settings/accessibility',{});}
 document.querySelectorAll('[data-view]').forEach(button=>button.addEventListener('click',()=>navigate(button.dataset.view)));
 window.addEventListener('hashchange',()=>navigate(location.hash.slice(1)));

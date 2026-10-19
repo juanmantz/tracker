@@ -268,8 +268,8 @@ class Tracker:
             return result
         # Only text extracted from a recognized conversation pane can assign by
         # a unique project mention. Whole-window/sidebar text remains a suggestion.
-        if context.get('context_scope') in ('conversation', 'document_header', 'conversation_header') and len(result['candidates']) == 1:
-            reason = 'Project in the current conversation' if context['context_scope'] == 'conversation' else 'Project in the active document header'
+        if context.get('context_scope') in ('conversation', 'document_header', 'conversation_header', 'screenshot') and len(result['candidates']) == 1:
+            reason = 'Project read from the active work window' if context['context_scope'] == 'screenshot' else ('Project in the current conversation' if context['context_scope'] == 'conversation' else 'Project in the active document header')
             return {'project': result['candidates'][0]['project'], 'confidence': 'high', 'reason': reason, 'candidates': result['candidates']}
         if context.get('activity_kind') == 'call' and context.get('call_session'):
             title = ' '+normalize(context.get('title', ''))+' '
@@ -385,6 +385,22 @@ class Tracker:
         if context["excluded"]:
             context.update(title="", url="", identity="", document="")
         elif not sample.get('locked') and self.setting('desktop_context_enabled', True) and not is_noise_context(context):
+            # Screenshot OCR is ephemeral. Retain only names/IDs from the
+            # existing trusted project catalogue, never the OCR/transcript.
+            screen_at = sample.get('screen_context_at')
+            if (sample.get('screen_capture_permission') is True and not self.paused and
+                    sample.get('idle', 0) < self.idle_after and isinstance(screen_at, (int, float)) and
+                    not isinstance(screen_at, bool) and math.isfinite(screen_at) and
+                    0 <= sample['ts'] - screen_at <= 12 and isinstance(sample.get('screen_context'), str)):
+                matches = recognize(context, self.setting('recognition_catalog', []), snippets=[sample['screen_context'][:6000]])
+                if matches['candidates']:
+                    context['project_hints'] = [{'project': c['project']} for c in matches['candidates']]
+                    context['context_scope'] = 'screenshot'
+                    screen_card = {'schema':'dreamstime/context/v1','kind':'window','scope':'screen_project',
+                                   'labels':[c['name'] for c in matches['candidates']]}
+                    screen_id = self.context_snapshots.put(screen_card, sample['ts'])
+                    if screen_id:
+                        context.update(snapshot_id=screen_id, snapshot_scope='screen_project')
             if verified_call(sample):
                 context.update(activity_kind='call', call_session=sample['call_session'])
             snapshot = self.context_snapshots.put(sample.get('context_snapshot'), sample['ts'])
@@ -449,7 +465,7 @@ class Tracker:
         self.previous = current
         self.current = current
         self.health.update(sensor="connected", accessibility=sample.get("accessibility", False), last_sample=ts)
-        self.health["collector"] = {k: sample[k] for k in ("collector_bundle", "collector_pid", "ax_trusted", "window_access_status", "permission_repair", "context_enabled", "context_capture_state") if k in sample}
+        self.health["collector"] = {k: sample[k] for k in ("collector_bundle", "collector_pid", "ax_trusted", "window_access_status", "permission_repair", "context_enabled", "context_capture_state", "screen_capture_permission", "screen_capture_state", "screen_capture_count", "screen_capture_failures") if k in sample}
         self.health['input'] = {k: round(sample[k], 1) for k in ('mouse_idle', 'keyboard_idle') if isinstance(sample.get(k), (int, float)) and math.isfinite(sample[k]) and sample[k] >= 0}
         return True
 

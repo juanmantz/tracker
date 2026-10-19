@@ -203,7 +203,7 @@ class App:
         if not settings['desktop_context_enabled']:
             sample = {k: v for k, v in sample.items() if k not in (
                 'context_snapshot', 'call_session', 'call_active', 'call_verified_at', 'call_proof',
-                'desktop_context', 'context_scope')}
+                'desktop_context', 'context_scope', 'screen_context', 'screen_context_at')}
         if self.tracker.ingest(sample):
             self.native_last_sample = time.time()
             self.sample_count += 1

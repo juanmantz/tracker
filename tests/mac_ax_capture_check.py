@@ -61,18 +61,20 @@ with tempfile.TemporaryDirectory() as temporary:
     grant_script=temporary/'grant-ci.py'
     grant_script.write_text("""
 import sqlite3,sys,time
-database,requirement=sys.argv[1:]
+database,requirement=sys.argv[1:3]
+service=sys.argv[3] if len(sys.argv)>3 else "kTCCServiceAccessibility"
+permission=int(sys.argv[4]) if len(sys.argv)>4 else 2
 db=sqlite3.connect(database)
 columns=db.execute('PRAGMA table_info(access)').fetchall()
-values={'service':'kTCCServiceAccessibility','client':'local.dreamstime.companion',
-        'client_type':0,'auth_value':2,'auth_reason':4,'auth_version':1,
+values={'service':service,'client':'local.dreamstime.companion',
+        'client_type':0,'auth_value':permission,'auth_reason':4,'auth_version':1,
         'csreq':open(requirement,'rb').read(),'policy_id':None,
         'indirect_object_identifier_type':0,'indirect_object_identifier':'UNUSED',
         'indirect_object_code_identity':None,'flags':0,'last_modified':int(time.time()),
         'pid':0,'pid_version':0,'boot_uuid':'UNUSED','last_reminded':0}
 keys=[column[1] for column in columns if column[1] in values]
 db.execute('DELETE FROM access WHERE service=? AND client=?',
-           ('kTCCServiceAccessibility','local.dreamstime.companion'))
+           (service,'local.dreamstime.companion'))
 db.execute('INSERT INTO access('+','.join(keys)+') VALUES('+','.join('?' for _ in keys)+')',
            [values[key] for key in keys])
 db.commit()
@@ -87,6 +89,9 @@ db.commit()
         input='identifier "local.dreamstime.companion" and cdhash H"'+'00'*20+'"',
         text=True,check=True)
     subprocess.run(['sudo',python,str(grant_script),'/Library/Application Support/com.apple.TCC/TCC.db',str(stale)],check=True)
+    # Isolate the AX denial contract: screen OCR has its own later test.
+    for database in ['/Library/Application Support/com.apple.TCC/TCC.db',str(Path.home()/'Library/Application Support/com.apple.TCC/TCC.db')]:
+        subprocess.run(['sudo',python,str(grant_script),database,str(csreq),'kTCCServiceScreenCapture','0'],check=True)
     subprocess.run(['sudo','/usr/bin/killall','tccd'],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     os.kill(old_pid,signal.SIGKILL)
     # Fixture setup only: launch a fresh background collector so no cached grant

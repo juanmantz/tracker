@@ -1,5 +1,5 @@
 // macOS context snapshots and connected-call sensor; visible conversation matching is local.
-// Never captures screenshots, editable chat content, keystrokes or call audio.
+// Optional foreground-window screenshots are OCRed locally and immediately discarded.
 import AppKit
 import ApplicationServices
 import Foundation
@@ -30,6 +30,7 @@ func startNativeActivitySensor(requestPermission: Bool = false,
     let editable: Set<String> = ["AXTextField", "AXTextArea", "AXSecureTextField", "AXComboBox", "AXOutline"]
     var callSessions: [String: String] = [:]
     var snapshotCache: (key: String, at: Double, card: [String: Any]?)?
+    let screenContext = ScreenContext()
     var preparedApplications = Set<pid_t>()
 
     func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
@@ -253,7 +254,7 @@ func startNativeActivitySensor(requestPermission: Bool = false,
     }
 
     func emit() {
-        if !enabled() { receive(["heartbeat": true]); return }
+        if !enabled() { screenContext.invalidate("paused"); receive(["heartbeat": true]); return }
         let foreground = NSWorkspace.shared.frontmostApplication
         let frontBundle = foreground?.bundleIdentifier ?? ""
         let trusted = AXIsProcessTrusted()
@@ -326,6 +327,9 @@ func startNativeActivitySensor(requestPermission: Bool = false,
         let mouseIdle = mouseTypes.map { CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) }.min() ?? idle
         let keyboardIdle = CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: .keyDown)
         let now = Date().timeIntervalSince1970
+        let screenEvidence = screenContext.evidence(pid: foreground?.processIdentifier ?? 0,
+            bundle: frontBundle, active: !locked && idle < 120 && callID == nil,
+            enabled: contextEnabled())
         var conversationText = ""
         if !locked && idle < 120 && callID == nil && contextEnabled() &&
             chatApps.contains(bundle) && now - lastConversationAt >= 10,
@@ -350,7 +354,14 @@ func startNativeActivitySensor(requestPermission: Bool = false,
             "accessibility": trusted || (windowAccessStatus == "readable" && foreground?.processIdentifier != ProcessInfo.processInfo.processIdentifier), "ax_trusted": trusted,
             "window_access_status": windowAccessStatus, "collector_bundle": Bundle.main.bundleIdentifier ?? "standalone",
             "collector_pid": ProcessInfo.processInfo.processIdentifier,
-            "context_enabled": contextEnabled(), "context_capture_state": captureState]
+            "context_enabled": contextEnabled(), "context_capture_state": captureState,
+            "screen_capture_permission": CGPreflightScreenCaptureAccess(),
+            "screen_capture_state": screenContext.state, "screen_capture_count": screenContext.captures,
+            "screen_capture_failures": screenContext.failures]
+        if let (text, at) = screenEvidence, !text.isEmpty {
+            event["screen_context"] = text
+            event["screen_context_at"] = at
+        }
         if !conversationText.isEmpty {
             event["desktop_context"] = conversationText
             event["context_scope"] = "conversation"

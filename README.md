@@ -4,7 +4,7 @@
 
 Download **Dreams Time.pkg** and open it with macOS Installer. It installs the complete native app in Applications and opens it. Both Apple Silicon and Intel runtimes are included; Python, Homebrew, Xcode, map imports and pairing tokens are not part of installation. Existing recorded hours and saved associations are kept.
 
-Tracking starts immediately. Allow macOS Accessibility when prompted to detect document names and project context. Closing the app window keeps tracking running; Quit Dreams Time stops it. A login item starts tracking with your Mac and recovers a crashed service. Pause and explicit Quit are respected; reopening resumes after Quit.
+Tracking starts immediately. On macOS 14 or later, allow Screen Recording once to identify projects from the active work window. Screenshots are read with local OCR, then discarded with the full text. Only compact project matches remain. Accessibility additionally supplies document identities and connected-call controls. Closing the app window keeps tracking running; Quit Dreams Time stops it. A login item starts tracking with your Mac and recovers a crashed service. Pause and explicit Quit are respected; reopening resumes after Quit.
 
 The personalized installer includes your current Dreams project catalog. Project recognition and local recording do not require account sign-in.
 
@@ -31,7 +31,7 @@ Each Mac/asset/week has one stable Worked-hours measurement. Resending replaces 
 
 ## Current limits
 
-The tracker measures foreground computer time, not ChatGPT subscription quotas or API billing. It has no continuous personal ChatGPT-account history feed or phone foreground tracker. Your own ChatGPT history export can provide phone conversation context, but message timestamps add zero hours. Desktop conversation recognition depends on what the ChatGPT app exposes through Accessibility.
+The tracker measures foreground computer time, not ChatGPT subscription quotas or API billing. It has no continuous personal ChatGPT-account history feed or phone foreground tracker. Your own ChatGPT history export can provide phone conversation context, but message timestamps add zero hours. Desktop conversation recognition uses foreground-window OCR and available Accessibility context. OCR needs a clear unique project name; ambiguous work remains unassigned. ChatGPT sidebar history and the bottom composer are excluded from OCR. Browser windows are excluded from screenshots.
 
 The OAuth/MCP workflow is tested against an isolated HTTP provider, using contracts inspected in the live Dreams worker. The packaged native window, private runtime, Installer installation and collector are checked on a Mac runner. That does not establish Gatekeeper or Accessibility approval on your own Mac, or your live Dreams sign-in. No fictional hours are written to the real account by tests. The daily review uses the existing Dreams connector, with no separate API key. See docs/AUTOMATION.md for the coordination contract.
 
