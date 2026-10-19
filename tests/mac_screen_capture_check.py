@@ -50,13 +50,17 @@ for service,allowed in [('kTCCServiceAccessibility',int(access)),('kTCCServiceSc
 db.commit()
 ''')
     python=str(Path(os.environ['pythonLocation'])/'bin/python3')
+    pid=api('/api/diagnostics')['health']['collector']['collector_pid']
+    assert api('/api/diagnostics')['health']['collector'].get('screen_capture_permission') is False
+    # Exercise the same shipped action as the native Allow screen capture button.
+    subprocess.run([str(APP/'Contents/MacOS/DreamsTime'),'--screen-access'],check=True)
+    wait_for(lambda:api('/api/diagnostics')['health'].get('collector',{}).get('screen_permission_setup')=='settings_open')
     for database in ['/Library/Application Support/com.apple.TCC/TCC.db',str(Path.home()/'Library/Application Support/com.apple.TCC/TCC.db')]:
         subprocess.run(['sudo',python,str(grant),database,str(csreq),'local.dreamstime.companion','0','2'],check=True)
     subprocess.run(['sudo','killall','tccd'],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
-    pid=api('/api/diagnostics')['health']['collector']['collector_pid']
-    os.kill(pid,signal.SIGKILL)
-    time.sleep(1)
-    subprocess.run(['/usr/bin/open','-n','-g',str(APP),'--args','--background'],check=True)
+    # Leaving Settings must refresh the actual collector automatically, with no
+    # manual Quit, process kill, timer check or Sync action.
+    subprocess.run(['/usr/bin/open','-a','Finder'],check=True)
     wait_for(lambda:(lambda c:c.get('collector_pid')!=pid and c.get('ax_trusted') is False and c.get('screen_capture_permission') is True)(api('/api/diagnostics')['health'].get('collector',{})))
     initial=api('/api/snapshot')['report']['totals'].get('fixture-3',0)
     fixture=folder/'Pixels.swift'
@@ -105,6 +109,6 @@ app.run()
             card=json.loads(zlib.decompress(db.execute('SELECT payload FROM context_snapshots WHERE id=?',(c['snapshot_id'],)).fetchone()[0]))
         assert card['source']=='screen_ocr' and card['labels']==['Fixture project 3'],card
         assert 'PRIVATE' not in json.dumps(c) and 'Fixture project 7' not in json.dumps(card)
-        Path('artifacts/native-release/screen-capture-check.json').write_text(json.dumps({'real_window_pixels_ocr':True,'works_without_accessibility':True,'screen_permission_required':True,'sidebar_and_composer_excluded':True,'project':'fixture-3','measured_seconds_added_at_least':2,'images_stored':False,'full_ocr_text_retained':False,'screen_capture_count':health['screen_capture_count']}))
+        Path('artifacts/native-release/screen-capture-check.json').write_text(json.dumps({'real_window_pixels_ocr':True,'works_without_accessibility':True,'screen_permission_required':True,'setup_action_opened_settings':True,'collector_refreshed_automatically_after_setup':True,'sidebar_and_composer_excluded':True,'project':'fixture-3','measured_seconds_added_at_least':2,'images_stored':False,'full_ocr_text_retained':False,'screen_capture_count':health['screen_capture_count']}))
     finally:process.terminate();process.wait(timeout=5)
 print('Installed app OCRed real window pixels, excluded sidebar/draft and attributed actual seconds without Accessibility.')

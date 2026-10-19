@@ -116,6 +116,7 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
         checkPermissionRepair()
         checkScreenPermission()
         var sample = rawSample
+        sample["screen_permission_setup"] = screenRepairInProgress ? (screenSettingsSeen ? "settings_open" : "waiting_for_allow") : (CGPreflightScreenCaptureAccess() ? "ready" : "required")
         sample["permission_repair"] = permissionRepairInProgress ? (permissionSettingsSeen ? "settings_open" : "waiting_for_allow") : (AXIsProcessTrusted() ? "ready" : "required")
         let support = home.appendingPathComponent("Library/Application Support/Dreams Time")
         if FileManager.default.fileExists(atPath: support.appendingPathComponent(".stopped").path) {
@@ -169,6 +170,7 @@ final class DreamsTimeApp: NSObject, NSApplicationDelegate, WKNavigationDelegate
     @objc func reopenRequested(_ notification: Notification) {
         showWindow()
         if notification.object as? String == "repair-access" { repairAccess() }
+        if notification.object as? String == "screen-access" { requestScreenAccess() }
         startService()
     }
 
@@ -381,7 +383,7 @@ struct DreamsTimeMain {
             Darwin.close(descriptor)
             if !CommandLine.arguments.contains("--background") {
                 DistributedNotificationCenter.default().postNotificationName(
-                    Notification.Name("local.dreamstime.reopen"), object: CommandLine.arguments.contains("--repair-access") ? "repair-access" : nil, userInfo: nil,
+                    Notification.Name("local.dreamstime.reopen"), object: CommandLine.arguments.contains("--screen-access") ? "screen-access" : (CommandLine.arguments.contains("--repair-access") ? "repair-access" : nil), userInfo: nil,
                     deliverImmediately: true)
             }
             return false
