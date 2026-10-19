@@ -43,9 +43,13 @@ def wait_for(check, timeout=30):
 with tempfile.TemporaryDirectory() as temporary:
     temporary=Path(temporary)
     # First prove the compact update installs over the real installed application.
+    before_projects={p['id'] for p in api('/api/snapshot')['projects']}
+    before_seed=(SUPPORT/'bootstrap-projects.json').read_bytes()
     subprocess.run(['sudo','/usr/sbin/installer','-pkg','artifacts/native-release/Dreams-Time-Update.pkg','-target','/'],check=True)
     subprocess.run(['/usr/bin/codesign','--verify','--deep','--strict',str(APP)],check=True)
     wait_for(lambda:api('/api/diagnostics')['health'].get('collector'))
+    assert (SUPPORT/'bootstrap-projects.json').read_bytes()==before_seed,'Update replaced the existing project bootstrap'
+    assert {p['id'] for p in api('/api/snapshot')['projects']}==before_projects,'Update lost project recognition catalog'
     old_pid=api('/api/diagnostics')['health']['collector']['collector_pid']
     signed=subprocess.run(['/usr/bin/codesign','-d','-r-',str(APP)],capture_output=True,text=True,check=True)
     requirement=signed.stdout+'\n'+signed.stderr

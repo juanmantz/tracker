@@ -42,7 +42,12 @@ class App:
                 bootstrap = json.loads(bootstrap_path.read_text())
                 stamp = digest(bootstrap)
                 if self.tracker.setting('bootstrap_stamp') != stamp:
-                    self.tracker.import_projects(bootstrap)
+                    # Installer templates are not authoritative map deletions.
+                    # An empty generic seed must preserve an existing catalog.
+                    nodes = bootstrap.get('nodes', []) if isinstance(bootstrap, dict) else []
+                    if isinstance(nodes, list) and any(isinstance(n, dict) and not n.get('archived') and
+                            n.get('kind') in ('project','product','service','content','personal','inbound','outbound') for n in nodes):
+                        self.tracker.import_projects(bootstrap)
                     self.tracker.set_setting('bootstrap_stamp', stamp)
                 preferences = bootstrap.get('preferences', {})
                 if isinstance(preferences, dict) and preferences.get('desktop_context_enabled') is True and self.tracker.setting('desktop_context_enabled') is None:
