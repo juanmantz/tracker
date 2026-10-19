@@ -43,7 +43,7 @@ with tempfile.TemporaryDirectory() as temporary:
 database,requirement,client,access,screen=sys.argv[1:]
 db=sqlite3.connect(database)
 columns=db.execute('PRAGMA table_info(access)').fetchall()
-for service,allowed in [('kTCCServiceAccessibility',int(access)),('kTCCServiceScreenCapture',int(screen))]:
+for service,allowed in [('kTCCServiceAccessibility',int(access)),('kTCCServicePostEvent',int(access)),('kTCCServiceScreenCapture',int(screen))]:
  values={'service':service,'client':client,'client_type':0,'auth_value':allowed,'auth_reason':4,'auth_version':1,'csreq':open(requirement,'rb').read(),'policy_id':None,'indirect_object_identifier_type':0,'indirect_object_identifier':'UNUSED','indirect_object_code_identity':None,'flags':0,'last_modified':int(time.time()),'pid':0,'pid_version':0,'boot_uuid':'UNUSED','last_reminded':0}
  keys=[c[1] for c in columns if c[1] in values]
  db.execute('DELETE FROM access WHERE service=? AND client=?',(service,client))
@@ -66,6 +66,7 @@ db.commit()
     initial=api('/api/snapshot')['report']['totals'].get('fixture-3',0)
     fixture=folder/'Pixels.swift'
     fixture.write_text('''import AppKit
+import ApplicationServices
 let app=NSApplication.shared
 app.setActivationPolicy(.regular)
 let menu=NSMenu(),item=NSMenuItem(),submenu=NSMenu()
@@ -85,11 +86,15 @@ let window=NSWindow(contentRect:NSRect(x:120,y:120,width:900,height:600),styleMa
 window.title="ChatGPT";window.contentView=Pixels(frame:window.contentView!.bounds)
 window.makeKeyAndOrderFront(nil);app.activate(ignoringOtherApps:true)
 // CI generates real mouse activity only inside its synthetic fixture.
+var shifted=false
 let timer=Timer.scheduledTimer(withTimeInterval:1,repeats:true){_ in
     // The permission-triggered relaunch finishes asynchronously. Keep the
     // synthetic work window in front while its pixels are being verified.
     window.makeKeyAndOrderFront(nil);app.activate(ignoringOtherApps:true)
-    CGEvent(mouseEventSource:nil,mouseType:.mouseMoved,mouseCursorPosition:CGPoint(x:700,y:350),mouseButton:.left)?.post(tap:.cghidEventTap)
+    guard AXIsProcessTrusted() && CGPreflightPostEventAccess() else { fputs("CI pixel fixture lacks mouse-event permission.\\n",stderr);exit(2) }
+    let source=CGEventSource(stateID:.hidSystemState)
+    shifted.toggle()
+    CGEvent(mouseEventSource:source,mouseType:.mouseMoved,mouseCursorPosition:CGPoint(x:shifted ? 703 : 697,y:350),mouseButton:.left)?.post(tap:.cghidEventTap)
 }
 app.run()
 ''')
@@ -102,11 +107,13 @@ app.run()
     fixture_requirement=next(line.split('designated => ',1)[1] for line in (fixture_signed.stdout+'\n'+fixture_signed.stderr).splitlines() if 'designated => ' in line)
     fixture_csreq=folder/'fixture.csreq'
     subprocess.run(['/usr/bin/csreq','-r-','-b',str(fixture_csreq)],input=fixture_requirement,text=True,check=True)
-    subprocess.run(['sudo',python,str(grant),'/Library/Application Support/com.apple.TCC/TCC.db',str(fixture_csreq),'com.openai.chatgpt','2','0'],check=True)
+    for database in ['/Library/Application Support/com.apple.TCC/TCC.db',str(Path.home()/'Library/Application Support/com.apple.TCC/TCC.db')]:
+        subprocess.run(['sudo',python,str(grant),database,str(fixture_csreq),'com.openai.chatgpt','2','0'],check=True)
     subprocess.run(['sudo','killall','tccd'],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
     process=subprocess.Popen([str(executable)])
     try:
         def matched():
+            assert process.poll() is None,'The CI mouse-event fixture exited before screenshot attribution'
             s=api('/api/snapshot');c=(s.get('current')or{}).get('context',{})
             return s if (s.get('current')or{}).get('project')=='fixture-3' and c.get('context_scope')=='screenshot' else None
         snapshot=wait_for(matched)
