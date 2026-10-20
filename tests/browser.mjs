@@ -11,10 +11,10 @@ let browser;const checks=[];
 try{
   browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox'],headless:true});
   const page=await browser.newPage({viewport:{width:1100,height:900}}),runtimeErrors=[];page.on('pageerror',e=>runtimeErrors.push(e.message));
-  let override=null;
+  let override=null,screenOverride=null;
   // Synthetic platform status for visual states only. The actual server/SQLite still
   // handle every project, pause, import, review and diagnostic operation.
-  await page.route('**/api/snapshot*',async route=>{const response=await route.fetch(),data=await response.json();if(override)Object.assign(data.recording,override);else if(!data.paused)Object.assign(data.recording,{state:'recording',process_running:true,sample_count:30,last_sample_age_seconds:0});await route.fulfill({response,json:data});});
+  await page.route('**/api/snapshot*',async route=>{const response=await route.fetch(),data=await response.json();if(override)Object.assign(data.recording,override);else if(!data.paused)Object.assign(data.recording,{state:'recording',process_running:true,sample_count:30,last_sample_age_seconds:0});if(screenOverride){data.desktop_context_enabled=true;data.health.accessibility=false;Object.assign(data.health.collector||(data.health.collector={}),screenOverride);}await route.fulfill({response,json:data});});
   await page.goto(`http://127.0.0.1:${port}/?welcome=1`);
   try{await page.getByRole('heading',{name:'Tracking is on',exact:true}).waitFor({timeout:6000});}catch(e){console.log('Runtime errors',runtimeErrors);console.log(await page.locator('body').innerText());throw e;}
   assert.equal(await page.locator('#today-timer').innerText(),'00:01:00');
@@ -29,11 +29,24 @@ try{
   checks.push('Resume returns to the recording state');
   override={state:'failed'};await page.evaluate(()=>refresh());await page.getByRole('heading',{name:'Tracking is not working',exact:true}).waitFor();
   await page.getByRole('button',{name:'Restart tracking',exact:true}).waitFor();assert.equal(await page.locator('#live-check').isVisible(),false);assert.equal(await page.locator('#last-update').innerText(),'No new time is being recorded.');await page.screenshot({path:'artifacts/simple-blocked.png',fullPage:false});checks.push('Failed capture has a single Restart tracking action');
+  override={state:'permission_required'};await page.evaluate(()=>refresh());await page.getByRole('heading',{name:'Project detection needs access',exact:true}).waitFor();assert.equal(await page.locator('#live-check-result').isVisible(),false);await page.getByRole('button',{name:'Repair project detection',exact:true}).waitFor();await page.getByRole('button',{name:'Pause tracking',exact:true}).waitFor();checks.push('Denied native permission does not present a passing timer as successful project detection');
   override={state:'browser_unavailable'};await page.evaluate(()=>refresh());await page.getByText('Desktop app time is recorded. This browser is not included yet.',{exact:true}).waitFor();checks.push('Browser exclusion explains that desktop tracking remains on');
+  override={state:'permission_required'};screenOverride={screen_capture_permission:false,screen_capture_state:'permission_required'};
+  await page.evaluate(()=>refresh());await page.getByRole('button',{name:'Allow screen capture',exact:true}).waitFor();
+  assert.equal(await page.locator('#window-permission').isVisible(),false);
+  await page.locator('#allow-screen').click();await page.getByText('Open the installed Dreams Time app to allow Screen Recording.',{exact:true}).waitFor();
+  screenOverride={screen_capture_permission:true,screen_capture_state:'readable'};override={state:'recording'};
+  await page.evaluate(()=>refresh());assert.equal(await page.locator('#screen-permission').isVisible(),false);assert.equal(await page.locator('#window-permission').isVisible(),false);
+  checks.push('Screenshot setup has one clear permission action and disappears when Screen Recording is allowed, even without Accessibility');screenOverride=null;
   override=null;await page.evaluate(()=>refresh());
   await page.getByRole('button',{name:'Projects',exact:true}).click();await page.locator('#project-name').fill('Dreams work');await page.locator('#project-form button').click();
   await page.locator('.assignment select').first().selectOption({label:'Dreams work'});await page.getByRole('button',{name:'Remember document',exact:true}).click();
   await page.getByText('Project saved.',{exact:false}).waitFor();assert.equal(await page.locator('#weekly-total').innerText(),'1m 00s recorded');checks.push('Projects are separate and attribution uses real stored activity');
+  await page.locator('#project-totals details summary').click();
+  assert.match(await page.locator('#project-totals details').innerText(),/Saved window title/);
+  await page.evaluate(()=>refresh());assert.equal(await page.locator('#project-totals details').getAttribute('open'),'');
+  await page.screenshot({path:'artifacts/project-evidence.png',fullPage:true});
+  checks.push('Project totals expose document/app/reason evidence and preserve expanded breakdown through refresh');
   await page.locator('#review').evaluate(e=>e.closest('details').open=true);await page.locator('#review').click();await page.getByText('Hours reviewed. Ready to prepare an update.',{exact:true}).waitFor();
   await page.locator('#export').click();await page.getByText('Import your current Dreams map',{exact:false}).waitFor();checks.push('Reviewed export preserves missing-connection feedback');
   override={state:'recording',today_seconds:66};await page.locator('#project-name').focus();await page.waitForFunction(()=>document.querySelector('#today-timer').textContent==='00:01:06');checks.push('Polling continues while a form has focus');override=null;

@@ -8,7 +8,12 @@ INSTALL_HOME="$(/usr/bin/dscl . -read "/Users/$INSTALL_USER" NFSHomeDirectory | 
 INSTALL_DATA="$INSTALL_HOME/Library/Application Support/Dreams Time"
 INSTALL_AGENTS="$INSTALL_HOME/Library/LaunchAgents"
 /usr/bin/install -d -m 700 -o "$INSTALL_USER" -g "$INSTALL_GROUP" "$INSTALL_DATA"
-/usr/bin/install -m 600 -o "$INSTALL_USER" -g "$INSTALL_GROUP" "$(dirname "$0")/bootstrap-projects.json" "$INSTALL_DATA/bootstrap-projects.json"
+# A bootstrap is a first-install hint, never an update to the owner's catalog.
+# In particular, a generic update's empty template must not erase learned files
+# or leave an offline collector without project names to match.
+if [[ ! -f "$INSTALL_DATA/bootstrap-projects.json" ]]; then
+  /usr/bin/install -m 600 -o "$INSTALL_USER" -g "$INSTALL_GROUP" "$(dirname "$0")/bootstrap-projects.json" "$INSTALL_DATA/bootstrap-projects.json"
+fi
 /usr/bin/install -d -m 755 -o "$INSTALL_USER" -g "$INSTALL_GROUP" "$INSTALL_AGENTS"
 INSTALL_AGENT="$INSTALL_AGENTS/local.dreamstime.start.plist"
 cat > "$INSTALL_AGENT" <<'PLIST'

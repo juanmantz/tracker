@@ -120,8 +120,9 @@ class IntegrationTests(unittest.TestCase):
             self.assertIn('#projects',response.url)
         self.assertEqual(len(self.app.tracker.projects()),2)
 
-    def activity(self):
-        for offset in range(0,62,2):
+    def activity(self, seconds=3600):
+        # Accelerate the clock in <=max_gap steps; no wall-clock hour is needed.
+        for offset in [*range(0,seconds,10), seconds]:
             self.app.tracker.ingest({'ts':BASE+offset,'idle':0,'app':'com.figma.Desktop','app_name':'Figma','title':'Renamed file','document':'https://figma.com/design/atlasFile/Unrelated'})
 
     def hours(self, target='atlas'):
@@ -131,13 +132,13 @@ class IntegrationTests(unittest.TestCase):
     def test_real_http_oauth_recognition_sync_repeat_and_correction(self):
         self.connect(); self.activity()
         status, result = self.api('/api/dreams/sync', {'week':'2026-10-05'})
-        self.assertEqual(status,200,result); self.assertEqual(result['seconds'],60)
-        self.assertEqual(self.hours(),[round(60/3600,6)])
+        self.assertEqual(status,200,result); self.assertEqual(result['seconds'],3600)
+        self.assertEqual(self.hours(),[1])
         status, result = self.api('/api/dreams/sync', {'week':'2026-10-05'})
         self.assertEqual(status,200); self.assertTrue(result['unchanged']); self.assertEqual(len(self.provider.writes),1)
         self.app.tracker.add_rule('identity','figma:atlasFile','birch')
         self.assertEqual(self.api('/api/dreams/sync', {'week':'2026-10-05'})[0],200)
-        self.assertEqual(self.hours(),[0]); self.assertEqual(self.hours('birch'),[round(60/3600,6)])
+        self.assertEqual(self.hours(),[0]); self.assertEqual(self.hours('birch'),[1])
         self.assertEqual(self.provider.writes[0]['commands'][0]['measurement']['id'],self.provider.writes[1]['commands'][0]['measurement']['id'])
         self.assertNotIn('Renamed file',json.dumps(self.provider.writes))
 
@@ -147,9 +148,9 @@ class IntegrationTests(unittest.TestCase):
         self.app.connection.credentials['expires_at'] = 0
         status, result = self.api('/api/dreams/sync', {'week':'2026-10-05'})
         self.assertEqual(status, 200, result)
-        self.assertEqual(result['seconds'], 60)
+        self.assertEqual(result['seconds'], 3600)
         self.assertEqual(self.provider.refresh_count, 1)
-        self.assertEqual(self.hours(), [round(60/3600, 6)])
+        self.assertEqual(self.hours(), [1])
 
     def test_setup_denial_identifies_the_step_without_exposing_remote_secrets(self):
         self.activity()
@@ -163,7 +164,7 @@ class IntegrationTests(unittest.TestCase):
                 self.assertIn('HTTP 403', body['error'])
                 self.assertNotIn('PRIVATE', json.dumps(body))
                 self.assertIsNone(self.app.connection.pending)
-                self.assertEqual(self.app.tracker.report('2026-10-05')['total_seconds'], 60)
+                self.assertEqual(self.app.tracker.report('2026-10-05')['total_seconds'], 3600)
 
     def test_unknown_write_outcome_retries_identical_request_after_restart(self):
         self.connect(); self.activity(); self.provider.fail_after_write=True
@@ -208,8 +209,8 @@ class IntegrationTests(unittest.TestCase):
 
     def test_weekly_sync_only_completed_weeks_and_unknown_time_stays_local(self):
         self.connect(); self.activity()
-        self.app.tracker.ingest({'ts':BASE+62,'idle':0,'app':'editor','title':'Untitled'})
-        self.app.tracker.ingest({'ts':BASE+64,'idle':0,'app':'editor','title':'Untitled'})
+        self.app.tracker.ingest({'ts':BASE+3602,'idle':0,'app':'editor','title':'Untitled'})
+        self.app.tracker.ingest({'ts':BASE+3604,'idle':0,'app':'editor','title':'Untitled'})
         self.app.tracker.set_setting('weekly_sync',True)
         self.app.sync.weekly_tick(BASE+100)
         self.assertEqual(len(self.provider.writes),0)
@@ -232,7 +233,7 @@ class IntegrationTests(unittest.TestCase):
         self.provider.map['nodes'][0]['fields']['links']=''
         self.app.sync.send('2026-10-05')
         self.assertEqual(self.hours(),[0])
-        self.assertEqual(self.app.tracker.report('2026-10-05')['totals'],{'unassigned':60})
+        self.assertEqual(self.app.tracker.report('2026-10-05')['totals'],{'unassigned':3600})
 
     def test_unchanged_response_checks_actual_remote_record_after_undo(self):
         self.connect(); self.activity(); self.app.sync.send('2026-10-05')
@@ -240,4 +241,4 @@ class IntegrationTests(unittest.TestCase):
         self.provider.map['revision']+=1
         result=self.app.sync.send('2026-10-05')
         self.assertFalse(result.get('unchanged'))
-        self.assertEqual(self.hours(),[round(60/3600,6)])
+        self.assertEqual(self.hours(),[1])

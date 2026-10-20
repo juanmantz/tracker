@@ -3,6 +3,7 @@
 No raw browsing history or chat excerpts enter the exported batch.
 """
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal, ROUND_FLOOR
 from .core import digest
 from .recognition import WORK_KINDS
 
@@ -21,7 +22,7 @@ def build_worked_batch(report, state, installation_id, observed_at=None):
         if seconds and not target:
             raise ValueError("Connect '" + project['name'] + "' to a Dreams project before syncing.")
         if target:
-            totals[target] = totals.get(target, 0) + seconds
+            totals[target] = totals.get(target, Decimal(0)) + Decimal(str(seconds))
     # Retain zero corrections for snapshots previously written by this device.
     for target, node in nodes.items():
         ident = 'dreamstime-' + digest([installation_id, week, target])[:32]
@@ -32,17 +33,16 @@ def build_worked_batch(report, state, installation_id, observed_at=None):
         node = nodes.get(target)
         ident = 'dreamstime-' + digest([installation_id, week, target])[:32]
         existing = next((m for m in (node or {}).get('measurements', []) if m.get('id') == ident), None)
-        if not seconds and not existing:
+        hours = int((Decimal(str(seconds)) / Decimal(3600)).to_integral_value(rounding=ROUND_FLOOR))
+        if hours < 1 and not existing:
             continue
         if not node or node.get('archived') or node.get('kind') not in WORK_KINDS:
             raise ValueError('A destination was removed or archived in Dreams. Check its assignments before syncing.')
-        measurement = {'id': ident, 'metric': 'workedHours', 'amount': {'value': round(seconds / 3600, 6), 'unit': 'hours'},
-                       'basis': 'Worked', 'period': {'kind': 'Custom', 'start': week, 'end': end},
+        measurement = {'id': ident, 'metric': 'workedHours', 'amount': {'value': hours, 'unit': 'hours'},
+                       'basis': 'Worked', 'period': {'kind': 'Week', 'start': week, 'end': end},
                        'observedAt': observed_at or datetime.now(timezone.utc).isoformat(),
                        'source': 'Dreams Time · ' + installation_id, 'scope': 'Own'}
         commands.append({'type': 'record_measurement', 'id': target, 'measurement': measurement})
-    if not commands:
-        raise ValueError('No assigned Dreams hours to sync for this week.')
     payload = {'baseRevision': state['revision'], 'commands': commands}
     # observedAt is saved with the pending batch so a retry sends identical bytes.
     return {'requestId': 'dreamstime-' + digest([installation_id, payload])[:32], **payload}

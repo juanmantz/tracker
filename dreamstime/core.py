@@ -10,7 +10,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
-from .recognition import recognize, WORK_KINDS, normalize, GENERIC
+from .recognition import recognize, WORK_KINDS, normalize, GENERIC, screen_text
+from .context_snapshots import ContextSnapshots, verified_call, CALL_APPS
 
 BROWSERS = {"com.google.Chrome", "com.google.Chrome.beta", "com.microsoft.edgemac", "com.brave.Browser", "company.thebrowser.Browser", "com.apple.Safari", "org.mozilla.firefox"}
 BROWSER_FAMILIES = {"com.google.Chrome": "chrome", "com.google.Chrome.beta": "chrome", "com.microsoft.edgemac": "edge", "com.brave.Browser": "brave", "company.thebrowser.Browser": "arc"}
@@ -65,20 +66,46 @@ def digest(value):
 
 
 def context_key(context):
-    # An opaque association key. No URL, path or conversation text leaves the Mac.
+    # Keep legacy keys byte-compatible so existing associations/corrections survive.
+    if context.get('call_session'):
+        return digest(['call', context.get('app'), context['call_session']])
     if context.get('identity'):
         return digest(['identity', context['identity']])
-    return digest([context.get(k, '') for k in ('app', 'identity', 'title')] +
-                  [sorted(h['project'] for h in context.get('project_hints', []) if isinstance(h, dict) and isinstance(h.get('project'), str))])
+    values = [context.get(k, '') for k in ('app', 'identity', 'title')] + [
+        sorted(h['project'] for h in context.get('project_hints', [])
+               if isinstance(h, dict) and isinstance(h.get('project'), str))]
+    if context.get('snapshot_id') and context.get('snapshot_scope') != 'window_metadata':
+        values.append(context['snapshot_id'])
+    return digest(values)
+
+
+NOISE_APPS = {'com.apple.systempreferences', 'com.apple.installer', 'com.apple.CoreAuthUI',
+              'com.apple.SecurityAgent', 'com.apple.UserNotificationCenter', 'com.apple.ReportCrash',
+              'com.apple.DiskUtility', 'com.apple.archiveutility', 'local.dreamstime.companion'}
+
+
+def is_noise_context(context):
+    app = context.get('app', '')
+    title = normalize(context.get('title', ''))
+    if app in NOISE_APPS:
+        return True
+    if app == 'com.apple.mail' and re.match(r'^(all inboxes|all mail|inbox|mailboxes)(\b| )', title):
+        return True
+    if app == 'com.apple.finder' and re.fullmatch(r'\d{4}(?: \d{1,2}){0,2}', title):
+        return True
+    return False
 
 
 def rememberable(context):
-    if context.get('excluded'):
+    if (is_noise_context(context) or context.get('excluded') or context.get('activity_kind') == 'call'
+            or (context.get('app') in CALL_APPS and re.search(r'\b(call|meeting|huddle)\b', context.get('title', ''), re.I))):
         return False
     if context.get('identity'):
         return True
     if context.get('app') in ('com.openai.chat', 'com.openai.chatgpt', 'com.openai.codex'):
         return False  # Repeated generic desktop chat titles are not conversation IDs.
+    if normalize(context.get('title', '')) == normalize(context.get('app_name', '')):
+        return False
     meaningful = set(normalize(context.get('title', '')).split()) - GENERIC - {'untitled', 'draft', 'new', 'window'}
     return bool(meaningful)
 
@@ -126,6 +153,14 @@ class Tracker:
         self.run_start = None
         self.session = None
         self.desktop_context = None
+        self.context_snapshots = ContextSnapshots(self.db)
+        # Recheck recorded attribution once when upgrading the evidence policy.
+        # Preserve measured seconds, explicit assignments and review decisions.
+        if self.setting('attribution_policy') != 'document-evidence/v2':
+            with self.lock, self.db:
+                self.reclassify()
+                self.set_setting('attribution_policy', 'document-evidence/v2')
+                self.set_setting('auto_dirty', True)
 
     def setting(self, key, default=None):
         with self.lock:
@@ -157,6 +192,7 @@ class Tracker:
             raise ValueError("Expected a Dreams map with a nodes list.")
         candidates = []
         catalog = []
+        containers = {e.get('target') for e in state.get('edges', []) if e.get('relation') == 'Part of'}
         for n in nodes:
             if not isinstance(n, dict):
                 raise ValueError("Invalid node in Dreams map.")
@@ -168,7 +204,7 @@ class Tracker:
                 if not isinstance(links, str):
                     links = ""
                 urls = re.findall(r'https?://[^\s<>"\)]+', links)
-                catalog.append({"id":n["id"],"name":n["name"],"kind":n["kind"],"aliases": n['name'].split(' / ') if ' / ' in n['name'] else [],"identities":sorted(set(identity(u.rstrip('.,;')) for u in urls if identity(u.rstrip('.,;'))))})
+                catalog.append({"id":n["id"],"name":n["name"],"kind":n["kind"],"container":n["id"] in containers,"aliases": n['name'].split(' / ') if ' / ' in n['name'] else [],"identities":sorted(set(identity(u.rstrip('.,;')) for u in urls if identity(u.rstrip('.,;'))))})
         count = 0
         for n in candidates:
             if n.get("kind") in WORK_KINDS and not n.get("archived"):
@@ -238,11 +274,16 @@ class Tracker:
                     return {'project': decision['project'], 'confidence': 'reviewed', 'reason': 'Daily project review', 'candidates': []}
         if result['project'] or result['confidence'] == 'ambiguous':
             return result
-        # Only text extracted from a recognized conversation pane can assign by
-        # a unique project mention. Whole-window/sidebar text remains a suggestion.
-        if context.get('context_scope') == 'conversation' and len(result['candidates']) == 1:
-            return {'project': result['candidates'][0]['project'], 'confidence': 'high', 'reason': 'Project in the current conversation', 'candidates': result['candidates']}
-        if at is not None and context.get('app') in FOCUS_APPS:
+        # Mentions in pixels, conversation bodies or header cards are candidates,
+        # never proof of a project. Assignment requires a document identity/title,
+        # a remembered file, a bounded review or the owner's explicit focus.
+        if context.get('activity_kind') == 'call' and context.get('call_session'):
+            title = ' '+normalize(context.get('title', ''))+' '
+            collaborators = {hint['project'] for hint in self.setting('auto_review_hints', [])
+                if hint['project'] in valid and ' '+normalize(hint['label'])+' ' in title}
+            if len(collaborators) == 1:
+                return {'project': next(iter(collaborators)), 'confidence': 'reviewed', 'reason': 'Known collaborator in a connected call', 'candidates': []}
+        if at is not None and (context.get('app') in FOCUS_APPS or context.get('activity_kind') == 'call'):
             focus = next((f for f in reversed(self.setting('focus_history', [])) if f['at'] <= at), None)
             if focus and focus['project'] in valid:
                 return {'project': focus['project'], 'confidence': 'confirmed', 'reason': 'Current project set in ChatGPT', 'candidates': result['candidates']}
@@ -317,7 +358,10 @@ class Tracker:
         app = sample.get("app", "")[:200]
         title = sample.get("title", "")[:500]
         context = {"app": app, "app_name": sample.get("app_name", app)[:200], "title": title, "url": "", "identity": "", "source": "window", "excluded": app in EXCLUDED_APPS or not app}
-        if app not in BROWSERS and not context["excluded"]:
+        if self.desktop_context and (sample.get('locked') or sample['ts'] - self.desktop_context['at'] > 12 or
+                any(self.desktop_context.get(k, '') != context.get(k, '') for k in ('app', 'title'))):
+            self.desktop_context = None
+        if app not in BROWSERS and not context["excluded"] and not sample.get('locked'):
             document, ident = document_identity(sample.get("document", ""))
             context.update(document=document, identity=ident)
             if document.startswith("http"):
@@ -346,6 +390,40 @@ class Tracker:
                 context["excluded"] = True
         if context["excluded"]:
             context.update(title="", url="", identity="", document="")
+        elif not sample.get('locked') and self.setting('desktop_context_enabled', True) and not is_noise_context(context):
+            # Screenshot OCR is ephemeral. Retain only names/IDs from the
+            # existing trusted project catalogue, never the OCR/transcript.
+            screen_at = sample.get('screen_context_at')
+            if (sample.get('screen_capture_permission') is True and not self.paused and
+                    sample.get('idle', 0) < self.idle_after and isinstance(screen_at, (int, float)) and
+                    not isinstance(screen_at, bool) and math.isfinite(screen_at) and
+                    0 <= sample['ts'] - screen_at <= 12 and isinstance(sample.get('screen_context'), str)):
+                matches = recognize({'app':app}, self.setting('recognition_catalog', []), snippets=[screen_text(sample['screen_context'][:6000])])
+                if matches['candidates']:
+                    context['project_hints'] = [{'project': c['project']} for c in matches['candidates']]
+                    context['context_scope'] = 'screenshot'
+                    screen_card = {'schema':'dreamstime/context/v1','kind':'window','scope':'screen_project',
+                                   'labels':[c['name'] for c in matches['candidates']]}
+                    screen_id = self.context_snapshots.put(screen_card, sample['ts'])
+                    if screen_id:
+                        context.update(snapshot_id=screen_id, snapshot_scope='screen_project')
+            if verified_call(sample):
+                context.update(activity_kind='call', call_session=sample['call_session'])
+            snapshot = self.context_snapshots.put(sample.get('context_snapshot'), sample['ts'])
+            if snapshot:
+                card = self.context_snapshots.get(snapshot)
+                if card:
+                    context['snapshot_id'] = snapshot
+                    context['snapshot_scope'] = card['scope']
+                if card and (card['scope'] == 'conversation_header' or (card['scope'] == 'document_header' and
+                        app not in ('com.openai.chat', 'com.openai.chatgpt', 'com.openai.codex'))):
+                    context.setdefault('context_scope', card['scope'])
+                if card and card['labels']:
+                    suggested = recognize(context, self.setting('recognition_catalog', []), snippets=card['labels'])
+                    ids = {x['project'] for x in context.get('project_hints', [])}
+                    ids.update(x['project'] for x in suggested['candidates'])
+                    if ids:
+                        context['project_hints'] = [{'project': p} for p in sorted(ids)]
         return context
 
     def ingest(self, sample):
@@ -369,29 +447,31 @@ class Tracker:
                 self.session = None
             elif self.session["app"] == context["app"] and self.session["title"] == context["title"]:
                 project, reason = self.session["project"], "Explicit current session"
-        if sample.get("desktop_context") and not self.paused:
+        if sample.get("desktop_context") and not self.paused and not sample.get("locked") and not context["excluded"]:
             self.desktop_context = {"app": context["app"], "title": context["title"], "identity": context['identity'], "at": ts, "text": str(sample["desktop_context"])[:8000], "scope": sample.get('context_scope', 'window'), "source": "Visible accessibility text"}
-        active = not (self.paused or sample.get("locked") or idle >= self.idle_after or context["excluded"])
+        connected_call = context.get('activity_kind') == 'call'
+        effective_idle = 0 if connected_call else idle
+        active = not (self.paused or sample.get("locked") or effective_idle >= self.idle_after or context["excluded"])
         current = {"ts": ts, "mono": mono, "idle": idle, "active": active, "context": context, "project": project, "reason": reason}
         prev = self.previous
         with self.db:
-            if idle >= self.idle_after:
+            if effective_idle >= self.idle_after:
                 # Once idle is confirmed, remove the entire idle tail, including grace time.
                 last_input = max(self.run_start, ts - idle)
-                self.db.execute("DELETE FROM segments WHERE start>=?", (last_input,))
-                self.db.execute("UPDATE segments SET end=? WHERE start<? AND end>?", (last_input, last_input, last_input))
+                self.db.execute("DELETE FROM segments WHERE start>=? AND json_extract(context,'$.activity_kind') IS NOT 'call'", (last_input,))
+                self.db.execute("UPDATE segments SET end=? WHERE start<? AND end>? AND json_extract(context,'$.activity_kind') IS NOT 'call'", (last_input, last_input, last_input))
             if prev:
                 delta, elapsed = ts - prev["ts"], mono - prev["mono"]
                 if delta > self.max_gap or elapsed <= 0 or abs(delta - elapsed) > 3:
                     self.health["gaps"] += 1
                 elif prev["active"] and not self.paused and not sample.get("locked"):
-                    end = min(ts, ts - idle) if idle >= self.idle_after else ts
+                    end = min(ts, ts - idle) if effective_idle >= self.idle_after and prev['context'].get('activity_kind') != 'call' else ts
                     if end > prev["ts"]:
                         self.add_segment(prev["ts"], end, prev["context"], prev["project"], prev["reason"])
         self.previous = current
         self.current = current
         self.health.update(sensor="connected", accessibility=sample.get("accessibility", False), last_sample=ts)
-        self.health["collector"] = {k: sample[k] for k in ("collector_bundle", "collector_pid", "ax_trusted", "window_access_status") if k in sample}
+        self.health["collector"] = {k: sample[k] for k in ("collector_bundle", "collector_pid", "ax_trusted", "window_access_status", "permission_repair", "context_enabled", "context_capture_state", "screen_capture_permission", "screen_capture_state", "screen_capture_count", "screen_capture_failures", "screen_permission_setup") if k in sample}
         self.health['input'] = {k: round(sample[k], 1) for k in ('mouse_idle', 'keyboard_idle') if isinstance(sample.get(k), (int, float)) and math.isfinite(sample[k]) and sample[k] >= 0}
         return True
 

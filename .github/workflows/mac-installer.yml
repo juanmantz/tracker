@@ -1,12 +1,35 @@
 name: Build and install Mac app
 on:
   push:
-    branches: [main, mac-installer]
+    branches: [main, mac-installer, app-icon, compact-context]
   workflow_dispatch:
 permissions:
   contents: write
+concurrency:
+  group: dreams-mac-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
+  supersede:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Retire superseded builds of this branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          BUILD_BRANCH: ${{ github.ref_name }}
+          CURRENT_RUN: ${{ github.run_id }}
+        run: |
+          gh api --method GET "repos/$GH_REPO/actions/workflows/mac-installer.yml/runs?branch=$BUILD_BRANCH&per_page=20" --jq '.workflow_runs[] | select(.status != "completed") | .id' > /tmp/dreams-build-runs
+          while IFS= read -r BUILD_RUN; do
+            if (( BUILD_RUN < CURRENT_RUN )); then
+              gh run cancel "$BUILD_RUN" --repo "$GH_REPO" || true
+            fi
+          done < /tmp/dreams-build-runs
   installer:
+    needs: supersede
     runs-on: macos-latest
     timeout-minutes: 15
     steps:
@@ -14,6 +37,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Verify capture and whole-hour transfer contracts before building
+        run: python3 -m unittest discover -s tests -v
       - name: Fetch verified bundled Python runtimes
         run: |
           curl -fL --retry 2 'https://github.com/astral-sh/python-build-standalone/releases/download/20261009/cpython-3.12.15%2B20261009-aarch64-apple-darwin-install_only_stripped.tar.gz' -o /tmp/dreamstime-arm64.tar.gz
@@ -23,8 +48,11 @@ jobs:
       - name: Build native universal app and installer
         run: bash scripts/build-installer-mac.sh
       - name: Start the prior service with saved history before upgrading
-        run: python3 tests/mac_upgrade_check.py prepare
+        run: |
+          defaults write local.dreamstime.companion screenCaptureRequested -bool true
+          python3 tests/mac_upgrade_check.py prepare
       - name: Install using macOS Installer and open the real native window
+        id: native_install
         run: |
           python3 - <<'PY'
           import json
@@ -42,7 +70,7 @@ jobs:
           python3 - <<'PY'
           import json
           h=json.load(open('artifacts/native-release/health.json'))
-          assert h['app']=='dreams-time' and h['version']=='0.8.1' and h['capture_host']=='app'
+          assert h['app']=='dreams-time' and h['version']=='0.12.0' and h['capture_host']=='app'
           s=json.load(open('artifacts/native-release/native-sample.json'))
           assert isinstance(s['app'],str) and s['idle']>=0 and isinstance(s['accessibility'],bool)
           import time, urllib.request
@@ -67,13 +95,20 @@ jobs:
           PY
       - name: Verify preserved hours and live sign-in setup from the installed app
         run: python3 tests/mac_upgrade_check.py verify
-      - name: Verify unattended recovery of the installed app
-        run: python3 tests/mac_autonomy_check.py
       - name: Prove Accessibility and document capture in the installed app process
         run: python3 tests/mac_ax_capture_check.py
+      - name: Verify compact context, background call capture and a single app instance
+        run: python3 tests/mac_context_capture_check.py
+      - name: Prove real foreground screenshots, OCR and measured project time without Accessibility
+        if: ${{ always() && steps.native_install.outcome == 'success' }}
+        run: python3 tests/mac_screen_capture_check.py
+      - name: Verify unattended recovery of the installed app
+        run: python3 tests/mac_autonomy_check.py
+      - name: Verify the real installed native app icon
+        run: python3 tests/mac_app_icon_check.py
       - uses: actions/upload-artifact@v4
         with:
-          name: Dreams-Time-0.8.1-Update
+          name: Dreams-Time-0.12.0-Update
           path: artifacts/native-release/Dreams-Time-Update.pkg
           compression-level: 0
       - name: Split download into manageable artifacts
@@ -109,16 +144,29 @@ jobs:
             artifacts/native-release/live-setup-check.json
             artifacts/native-release/autonomy-check.json
             artifacts/native-release/ax-capture-check.json
+            artifacts/native-release/context-check.json
+            artifacts/native-release/screen-capture-check.json
+            artifacts/native-release/ci-screen-fixture.json
+            artifacts/native-release/ci-screen-fixture.png
+            artifacts/native-release/icon-check.json
+            artifacts/native-release/installed-icon.png
       - name: Publish direct installer downloads after successful Mac verification
-        if: github.event_name == 'push' && github.ref == 'refs/heads/mac-installer'
+        if: github.event_name == 'push' && (github.ref == 'refs/heads/mac-installer' || github.ref == 'refs/heads/app-icon' || github.ref == 'refs/heads/compact-context')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          Path("artifacts/native-release/release-notes.txt").write_text("Dreams Time 0.8.1 retires surviving legacy GUI/backend processes during installation and enforces app-owned native collection. Collector diagnostics publish promptly after changes.\n\nExisting installations: use Dreams-Time-Update.pkg. Recorded activity, pairing and private runtimes are preserved. New installations: use Dreams-Time-Installer.pkg.\n")
+          Path("artifacts/native-release/release-notes.txt").write_text("Dreams Time 0.12.0 corrects project attribution. A name in screenshot or conversation text is now a suggestion, never sufficient proof for assigning time. Actual document titles, linked/remembered files, bounded review decisions and your explicit current project remain supported. Broad parent/account-only names are held for review. The Mac automatically rechecks older assignments and replaces its own weekly totals without deleting measured time. No hours are invented or rounded up.\n\nEvery device report now includes a separate current-week assignment audit with project totals and document/app/reason evidence, independent of a crowded uncertain-activity queue. The Projects page has a What counted breakdown. WindowServer document titles can be read when Screen Recording is allowed even if Accessibility is denied. Images and full OCR text remain discarded.\n\nThe installer preserves recorded history, sign-in and learned file associations. The app remains ad-hoc signed; macOS controls permission approval.\n")
           PY
-          if ! gh release view v0.8.1 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh release create v0.8.1 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dreams Time 0.8.1" --notes-file artifacts/native-release/release-notes.txt
+          LATEST_BUILD="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq '.object.sha')"
+          if [[ "$LATEST_BUILD" != "$GITHUB_SHA" ]]; then
+            echo "A newer build superseded this run; no download published."
+            exit 0
           fi
-          gh release upload v0.8.1 --repo "$GITHUB_REPOSITORY" artifacts/native-release/Dreams-Time-Update.pkg artifacts/native-release/Dreams-Time-Installer.pkg --clobber
+          if gh release view v0.12.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Version 0.12.0 is already released; keeping its installer immutable."
+            exit 0
+          fi
+          gh release create v0.12.0 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dreams Time 0.12.0" --notes-file artifacts/native-release/release-notes.txt
+          gh release upload v0.12.0 --repo "$GITHUB_REPOSITORY" artifacts/native-release/Dreams-Time-Update.pkg artifacts/native-release/Dreams-Time-Installer.pkg artifacts/app-icon/Dreams-Time-Icon.png artifacts/app-icon/Dreams-Time-Icon-128.png

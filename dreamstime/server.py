@@ -42,7 +42,12 @@ class App:
                 bootstrap = json.loads(bootstrap_path.read_text())
                 stamp = digest(bootstrap)
                 if self.tracker.setting('bootstrap_stamp') != stamp:
-                    self.tracker.import_projects(bootstrap)
+                    # Installer templates are not authoritative map deletions.
+                    # An empty generic seed must preserve an existing catalog.
+                    nodes = bootstrap.get('nodes', []) if isinstance(bootstrap, dict) else []
+                    if isinstance(nodes, list) and any(isinstance(n, dict) and not n.get('archived') and
+                            n.get('kind') in ('project','product','service','content','personal','inbound','outbound') for n in nodes):
+                        self.tracker.import_projects(bootstrap)
                     self.tracker.set_setting('bootstrap_stamp', stamp)
                 preferences = bootstrap.get('preferences', {})
                 if isinstance(preferences, dict) and preferences.get('desktop_context_enabled') is True and self.tracker.setting('desktop_context_enabled') is None:
@@ -191,6 +196,14 @@ class App:
         ts = sample.get("ts")
         if not isinstance(ts, (int, float)) or isinstance(ts, bool) or not time.time() - 10 <= ts <= time.time() + 5:
             raise ValueError("Expected a current native sample.")
+        # Reading our own window is possible without a global Accessibility grant.
+        # It must never make the dashboard claim that other documents are readable.
+        if sample.get('app') == 'local.dreamstime.companion' and sample.get('ax_trusted') is False:
+            sample = {**sample, 'accessibility': False}
+        if not settings['desktop_context_enabled']:
+            sample = {k: v for k, v in sample.items() if k not in (
+                'context_snapshot', 'call_session', 'call_active', 'call_verified_at', 'call_proof',
+                'desktop_context', 'context_scope', 'screen_context', 'screen_context_at')}
         if self.tracker.ingest(sample):
             self.native_last_sample = time.time()
             self.sample_count += 1

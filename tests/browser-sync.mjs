@@ -11,11 +11,11 @@ let browser;const checks=[];
 try{
   browser=await chromium.launch({executablePath:process.env.CHROMIUM_PATH||'/usr/bin/chromium',args:['--no-sandbox'],headless:true});
   const page=await browser.newPage({viewport:{width:1100,height:950}}),runtimeErrors=[];page.on('pageerror',e=>runtimeErrors.push(e.message));
-  await page.goto(`http://127.0.0.1:${port}/#projects`);await page.locator('#weekly-total').filter({hasText:'2m 00s recorded'}).waitFor();
+  await page.goto(`http://127.0.0.1:${port}/#projects`);await page.locator('#weekly-total').filter({hasText:'2h 00m recorded'}).waitFor();
   await page.locator('#connect-projects').click();
   await page.waitForURL(`http://127.0.0.1:${port}/#projects`);await page.getByText('Assigned to Atlas Studio · File linked in Dreams',{exact:true}).waitFor();
   checks.push('Connect button completes real HTTP registration, redirect, PKCE callback, token exchange and MCP project load against an isolated provider');
-  assert.equal(await page.locator('#project-totals').innerText(),'Atlas Studio\n1m 00s\nNeeds a project\n1m 00s');
+  assert.equal(await page.locator('#project-totals').innerText(),'Atlas Studio\n1h 00m\nWhat counted for Atlas Studio\nNeeds a project\n1h 00m');
   const suggested=page.locator('.activity').filter({has:page.getByRole('heading',{name:'Strategy',exact:true})});
   await suggested.getByText('Suggested: Birch Client',{exact:false}).waitFor();assert.equal(await suggested.locator('select').inputValue(),'birch');
   checks.push('File rename still matches its linked identity; submitted conversation content suggests a project without assigning it');
@@ -25,9 +25,9 @@ try{
   await generic.locator('select').selectOption('birch');await generic.getByRole('button',{name:'Assign this activity',exact:true}).click();
   await generic.getByText('Assigned to Birch Client · Manually assigned activity',{exact:true}).waitFor();
   checks.push('Confirm a conversation match and assign an unnamed desktop activity without saving a generic title rule');
-  await page.locator('#sync').click();await page.getByText('2m 00s sent to Dreams',{exact:false}).waitFor();
-  await page.locator('#sync-status').filter({hasText:'Last saved'}).waitFor();
-  await page.locator('#sync').click();await page.getByText('Dreams already has these totals.',{exact:true}).waitFor();
+  await page.locator('#sync').click();await page.locator('#notice-text').filter({hasText:'2 whole hours verified in Dreams'}).waitFor();
+  await page.locator('#sync-status').filter({hasText:'2 whole hours verified'}).waitFor();
+  await page.locator('#sync').click();await page.getByText('Dreams already has these verified whole-hour totals.',{exact:true}).waitFor();
   checks.push('Direct Sync writes assigned Worked totals and repeat sync reports unchanged totals');
   await fs.mkdir('artifacts',{recursive:true});await page.screenshot({path:'artifacts/project-sync.png',fullPage:true});
   await page.getByRole('button',{name:'Settings',exact:true}).click();assert.equal(await page.locator('#weekly-sync').isChecked(),true);await page.locator('#weekly-sync').uncheck();await page.locator('#weekly-sync').check();
@@ -40,7 +40,7 @@ try{
   checks.push('Connected project screen fits a narrow viewport');
   await page.getByRole('button',{name:'Settings',exact:true}).click();await page.locator('#disconnect').click();
   await page.getByText('Dreams disconnected. Your recorded hours are kept.',{exact:true}).waitFor();assert.equal(await page.locator('#weekly-sync').isDisabled(),true);
-  await page.getByRole('button',{name:'Projects',exact:true}).click();assert.equal(await page.locator('#weekly-total').innerText(),'2m 00s recorded');
+  await page.getByRole('button',{name:'Projects',exact:true}).click();assert.equal(await page.locator('#weekly-total').innerText(),'2h 00m recorded');
   checks.push('Disconnect removes credentials and keeps recorded work');assert.deepEqual(runtimeErrors,[]);
   console.log(JSON.stringify({passed:true,checks},null,2));await fs.writeFile('artifacts/sync-browser-results.json',JSON.stringify({passed:true,checks},null,2));
 }finally{if(browser)await browser.close();server.kill();await fs.rm(dir,{recursive:true,force:true});}

@@ -25,7 +25,7 @@ for arch, source in ([] if args.update_only else RUNTIMES.items()):
     assert hashlib.sha256(source.read_bytes()).hexdigest() == EXPECTED[arch], 'Runtime checksum mismatch'
     shutil.copyfile(source, RESOURCES / 'runtime' / (arch + '.tar.gz'))
 for directory in ('dreamstime', 'native', 'web', 'extension'):
-    shutil.copytree(ROOT / directory, RESOURCES / 'project' / directory, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', 'activity-sensor'))
+    shutil.copytree(ROOT / directory, RESOURCES / 'project' / directory, ignore=shutil.ignore_patterns('__pycache__', '*.pyc', 'activity-sensor', 'DreamsTime.png', 'AppIcon.icns'))
 sensor_binary = RESOURCES / 'project' / 'native' / 'activity-sensor'
 if args.native_sensor:
     shutil.copyfile(args.native_sensor, sensor_binary)
@@ -35,11 +35,16 @@ shutil.copyfile(args.native_binary or ROOT / 'scripts' / 'launch-mac.sh', execut
 if args.native_binary:
     shutil.copyfile(ROOT / 'scripts' / 'launch-mac.sh', RESOURCES / 'launch-mac.sh')
 executable.chmod(0o755)
+icon_source = ROOT / 'native' / 'AppIcon.icns'
+if icon_source.exists():
+    shutil.copyfile(icon_source, RESOURCES / 'AppIcon.icns')
 info = {'CFBundleName':'Dreams Time', 'CFBundleDisplayName':'Dreams Time', 'CFBundleIdentifier':'local.dreamstime.companion',
-        'CFBundleExecutable':'DreamsTime', 'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':'0.8.1',
-        'CFBundleVersion':'10', 'LSUIElement':not bool(args.native_binary), 'LSMinimumSystemVersion':'12.0', 'NSHighResolutionCapable':True,
+        'CFBundleExecutable':'DreamsTime', 'CFBundlePackageType':'APPL', 'CFBundleShortVersionString':'0.12.0',
+        'CFBundleVersion':'17', 'LSUIElement':not bool(args.native_binary), 'LSMinimumSystemVersion':'12.0', 'NSHighResolutionCapable':True,
         'NSAccessibilityUsageDescription':'Dreams Time reads the active document name to identify the project you are working on.',
         'NSAppTransportSecurity':{'NSAllowsLocalNetworking':True}}
+if icon_source.exists():
+    info['CFBundleIconFile'] = 'AppIcon.icns'
 (APP / 'Contents' / 'Info.plist').write_bytes(plistlib.dumps(info))
 (APP / 'Contents' / 'PkgInfo').write_bytes(b'APPL????')
 # All distributable app resources readable; entry point executable after Finder extraction.
@@ -53,17 +58,18 @@ readme.write_text(("Small update for an already installed Dreams Time Mac app. R
 2. Open Dreams Time.app.
 
 Your existing tracking data and settings are kept. The old running version is replaced.
-Open Projects > Connect Dreams to sign in once and load your projects.
-Check project assignments, then click Sync assigned hours to send this week's totals.
-Project hours save automatically every five minutes, including the current week.
+If already connected to Dreams, your sign-in is preserved. Otherwise connect once in Projects.
+Project matching and completed-hour saving run automatically, including the current week.
+The update rechecks old inferred assignments without deleting measured time.
+Projects > What counted shows the documents, apps and reasons behind each total.
 
 If macOS blocks the unsigned app, use Privacy & Security > Open Anyway.
 Python, Homebrew and Xcode are not needed. A browser companion is needed only for browser activity.
 The app installs in your user Applications folder. Your activity remains on your Mac.
 
-This development app is not signed/notarized and has not been launched on a physical Mac in this Linux build session.
+The app is ad-hoc signed and is not notarized. Releases are gated by installed-app tests on a macOS runner.
 """)
-OUT = ROOT.parent / ('Dreams-Time-Update-0.8.zip' if args.update_only else 'Dreams-Time-Mac-0.8.zip')
+OUT = ROOT.parent / ('Dreams-Time-Update-0.12.0.zip' if args.update_only else 'Dreams-Time-Mac-0.12.0.zip')
 with zipfile.ZipFile(OUT, 'w', zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
     for p in sorted(APP.rglob('*')):
         archive.write(p, p.relative_to(BUILD))
@@ -73,4 +79,4 @@ with zipfile.ZipFile(OUT) as archive:
     mode = archive.getinfo('Dreams Time.app/Contents/MacOS/DreamsTime').external_attr >> 16
     assert mode & 0o111
     assert not any('activity.sqlite' in p or 'pairing-token' in p for p in archive.namelist())
-print(json.dumps({'file':str(OUT),'bytes':OUT.stat().st_size,'update_only':args.update_only,'version':'0.8.1'}))
+print(json.dumps({'file':str(OUT),'bytes':OUT.stat().st_size,'update_only':args.update_only,'version':'0.12.0'}))

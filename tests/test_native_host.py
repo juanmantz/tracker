@@ -43,6 +43,15 @@ class NativeHostTests(unittest.TestCase):
         collector = self.app.snapshot()['health']['collector']
         self.assertFalse(collector['ax_trusted'])
         self.assertEqual(collector['window_access_status'], 'ax_error_-25211')
+    def test_reading_our_own_window_does_not_prove_external_document_access(self):
+        self.app.start_sensor()
+        self.app.accept_native_sample(self.sample(app='local.dreamstime.companion',app_name='Dreams Time',
+            title='Dreams Time',accessibility=True,ax_trusted=False,window_access_status='readable'))
+        snapshot=self.app.snapshot()
+        self.assertFalse(snapshot['health']['accessibility'])
+        self.assertEqual(snapshot['recording']['project_detection'],'permission_required')
+        self.assertEqual(snapshot['recording']['state'],'permission_required')
+
     def test_legacy_or_stale_collector_cannot_submit_as_the_current_app(self):
         for sample in [self.sample(collector_bundle='local.dreamstime.sensor'), self.sample(ts=time.time()-60)]:
             with self.assertRaises(ValueError): self.app.accept_native_sample(sample)
@@ -55,3 +64,17 @@ class NativeHostTests(unittest.TestCase):
         self.assertFalse(self.app.accept_native_sample({'heartbeat':True})['paused'])
         self.app.accept_native_sample(self.sample())
         self.assertEqual(self.app.sample_count,1)
+
+    def test_screen_context_can_identify_work_when_accessibility_is_denied(self):
+        self.app.tracker.import_projects({'revision':1,'nodes':[{'id':'hey','name':'Hey, transform','kind':'project','fields':{}}],'edges':[]})
+        self.app.tracker.set_setting('desktop_context_enabled',True)
+        self.app.start_sensor()
+        self.app.accept_native_sample(self.sample(app='com.openai.chatgpt',title='ChatGPT',
+            accessibility=False,ax_trusted=False,window_access_status='ax_error_-25211',
+            context_enabled=True,screen_capture_permission=True,screen_capture_state='readable',
+            screen_context_at=time.time(),screen_context='Hey, transform'))
+        snap=self.app.snapshot()
+        self.assertIsNone(snap['current']['project'])
+        self.assertEqual(snap['recommendation']['candidates'][0]['project'],'hey')
+        self.assertEqual(snap['recording']['project_detection'],'screen_ocr')
+        self.assertNotEqual(snap['recording']['state'],'permission_required')

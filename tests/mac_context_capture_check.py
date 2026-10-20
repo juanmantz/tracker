@@ -1,0 +1,195 @@
+"""Real Accessibility UI fixtures; no microphone, camera, messages or account."""
+import json
+import os
+import plistlib
+import signal
+import sqlite3
+import subprocess
+import tempfile
+import time
+import zlib
+from pathlib import Path
+from urllib.request import Request,urlopen
+
+assert os.environ.get('CI')=='true'
+APP=Path('/Applications/Dreams Time.app')
+SUPPORT=Path.home()/'Library/Application Support/Dreams Time'
+OUT=Path('artifacts/native-release')
+def api(path):
+    token=(SUPPORT/'pairing-token').read_text().strip()
+    with urlopen(Request('http://127.0.0.1:43123'+path,headers={'Authorization':'Bearer '+token}),timeout=3) as response:
+        return json.load(response)
+def wait_for(check,timeout=35):
+    end=time.monotonic()+timeout
+    while time.monotonic()<end:
+        try:
+            value=check()
+            if value:return value
+        except (OSError,ValueError,KeyError,TypeError):pass
+        time.sleep(.5)
+    raise AssertionError('The installed app did not capture the expected compact context')
+def gui_pids():
+    p=subprocess.run(['/usr/bin/pgrep','-x','DreamsTime'],capture_output=True,text=True)
+    return set(p.stdout.split())
+def current():return api('/api/snapshot')['current']
+def context():return (current() or {}).get('context',{})
+def stored(key):
+    with sqlite3.connect(SUPPORT/'activity.sqlite') as db:
+        row=db.execute('SELECT payload FROM context_snapshots WHERE id=?',(key,)).fetchone()
+        return json.loads(zlib.decompress(row[0])) if row else None
+
+with tempfile.TemporaryDirectory() as directory:
+    directory=Path(directory)
+    source=directory/'ContextFixture.swift'
+    source.write_text("""
+import AppKit
+import Foundation
+import WebKit
+let app=NSApplication.shared
+app.setActivationPolicy(.regular)
+let mode=CommandLine.arguments.last ?? "document"
+let menu=NSMenu()
+let item=NSMenuItem()
+let submenu=NSMenu()
+submenu.addItem(withTitle:"Quit",action:#selector(NSApplication.terminate(_:)),keyEquivalent:"q")
+item.submenu=submenu;menu.addItem(item);app.mainMenu=menu
+let window=NSWindow(contentRect:NSRect(x:150,y:150,width:600,height:400),
+                    styleMask:[.titled,.closable],backing:.buffered,defer:false)
+window.isReleasedWhenClosed=false
+window.title=mode=="call" ? "Fixture podcast partner - WhatsApp video call" : (mode=="conversation" ? "ChatGPT" : (mode=="metadata" ? "Fixture project 4 board" : "Untitled"))
+var webDelegate: NSObject?
+if mode=="conversation" {
+    class Ready: NSObject, WKNavigationDelegate {
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            DispatchQueue.main.asyncAfter(deadline:.now()+1) {
+                webView.window?.makeFirstResponder(webView)
+                webView.evaluateJavaScript("document.getElementById('prompt').focus()",completionHandler:nil)
+            }
+        }
+    }
+    let web=WKWebView(frame:window.contentView!.bounds)
+    web.autoresizingMask=[.width,.height]
+    let ready=Ready();webDelegate=ready;web.navigationDelegate=ready
+    window.contentView!.addSubview(web)
+    let history=String(repeating:"<div>Fixture project 7 - unrelated history</div>",count:120)
+    let before=String(repeating:"<div>",count:35),after=String(repeating:"</div>",count:35)
+    web.loadHTMLString("<html><head><style>body{display:grid;grid-template-columns:160px 1fr;height:100vh;margin:0}aside{overflow:auto;height:100vh}main{padding:20px}</style></head><body><aside aria-label='sidebar'>"+history+"</aside>"+before+"<main aria-label='conversation'><h1>Fixture project 3</h1><p>Current storyboard discussion.</p><textarea id='prompt'>PRIVATE DRAFT MUST NEVER ENTER SNAPSHOTS</textarea></main>"+after+"</body></html>",baseURL:nil)
+}
+if mode != "conversation" && mode != "metadata" {
+let header=NSTextField(labelWithString:mode=="call" ? "00:03" : "Fixture project 3 - storyboard")
+header.frame=NSRect(x:25,y:300,width:500,height:30)
+if mode != "call" { header.setAccessibilityIdentifier("document-title");header.setAccessibilityLabel("Document title") }
+window.contentView!.addSubview(header)
+if mode=="call" {
+    let end=NSButton(title:"End call",target:app,action:#selector(NSApplication.terminate(_:)))
+    end.frame=NSRect(x:25,y:200,width:150,height:40)
+    window.contentView!.addSubview(end)
+}
+let draft=NSTextField(string:"PRIVATE DRAFT MUST NEVER ENTER SNAPSHOTS")
+draft.frame=NSRect(x:25,y:80,width:500,height:30)
+window.contentView!.addSubview(draft)
+}
+window.makeKeyAndOrderFront(nil)
+app.activate(ignoringOtherApps:true)
+// Exercise active conversation use, rather than expecting the production
+// reader to inspect an idle session. This runs only in the synthetic CI app.
+let activityTimer=Timer.scheduledTimer(withTimeInterval:1,repeats:true){_ in
+    if mode=="conversation" { CGEvent(mouseEventSource:nil,mouseType:.mouseMoved,mouseCursorPosition:CGPoint(x:650,y:350),mouseButton:.left)?.post(tap:.cghidEventTap) }
+}
+app.run()
+""")
+    def launch(name,bundle,mode):
+        path=directory/(name+'.app')
+        binary=path/'Contents/MacOS/Fixture'
+        binary.parent.mkdir(parents=True)
+        (path/'Contents/Info.plist').write_bytes(plistlib.dumps({'CFBundleIdentifier':bundle,
+            'CFBundleExecutable':'Fixture','CFBundleName':name,'CFBundlePackageType':'APPL'}))
+        subprocess.run(['/usr/bin/xcrun','swiftc',str(source),'-o',str(binary)],check=True)
+        subprocess.run(['/usr/bin/codesign','--sign','-','--force',str(path)],check=True)
+        if bundle=='com.openai.chatgpt':
+            # Exact code grant for mouse-event generation by this disposable
+            # fixture. The installed collector's permission is unchanged.
+            signed=subprocess.run(['/usr/bin/codesign','-d','-r-',str(path)],capture_output=True,text=True,check=True)
+            requirement=next(line.split('designated => ',1)[1] for line in (signed.stdout+'\n'+signed.stderr).splitlines() if 'designated => ' in line)
+            csreq=directory/'conversation.csreq'
+            subprocess.run(['/usr/bin/csreq','-r-','-b',str(csreq)],input=requirement,text=True,check=True)
+            provision=directory/'active-fixture-ci.py'
+            provision.write_text('''import sqlite3,sys,time
+db=sqlite3.connect('/Library/Application Support/com.apple.TCC/TCC.db')
+values={'service':'kTCCServiceAccessibility','client':'com.openai.chatgpt','client_type':0,'auth_value':2,'auth_reason':4,'auth_version':1,'csreq':open(sys.argv[1],'rb').read(),'policy_id':None,'indirect_object_identifier_type':0,'indirect_object_identifier':'UNUSED','indirect_object_code_identity':None,'flags':0,'last_modified':int(time.time()),'pid':0,'pid_version':0,'boot_uuid':'UNUSED','last_reminded':0}
+keys=[c[1] for c in db.execute('PRAGMA table_info(access)').fetchall() if c[1] in values]
+db.execute('DELETE FROM access WHERE service=? AND client=?',('kTCCServiceAccessibility','com.openai.chatgpt'))
+db.execute('INSERT INTO access('+','.join(keys)+') VALUES('+','.join('?' for _ in keys)+')',[values[k] for k in keys]);db.commit()
+''')
+            python=str(Path(os.environ['pythonLocation'])/'bin/python3')
+            subprocess.run(['sudo',python,str(provision),str(csreq)],check=True)
+            subprocess.run(['sudo','/usr/bin/killall','tccd'],check=False,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+        return subprocess.Popen([str(binary),mode])
+    # The production instance lock must also cover direct login-job starts and
+    # LaunchServices "new instance" requests, without a second competing sampler.
+    original=gui_pids()
+    assert len(original)==1,'More than one installed GUI collector is running'
+    subprocess.run([str(APP/'Contents/MacOS/DreamsTime'),'--background'],check=True,timeout=10)
+    subprocess.run(['/usr/bin/open','-n','-g',str(APP)],check=True)
+    time.sleep(2)
+    assert gui_pids()==original,'Reopening created a competing collector'
+    document=launch('CI Document','local.dreamstime.contextfixture','document')
+    try:
+        def metadata():
+            c=context()
+            if c.get('app')!='local.dreamstime.contextfixture' or not c.get('snapshot_id'):return None
+            card=stored(c['snapshot_id'])
+            return card if card and any('Fixture project 3' in label for label in card['labels']) else None
+        card=wait_for(metadata)
+        assert 'PRIVATE DRAFT' not in json.dumps(card)
+        conversation=launch('CI Conversation','com.openai.chatgpt','conversation')
+        try:
+            def matched_conversation():
+                value=current() or {}
+                return value if value.get('project') is None and value.get('context',{}).get('context_scope') in ('conversation','conversation_header') and value.get('context',{}).get('project_hints') == [{'project':'fixture-3'}] else None
+            try:
+                active=wait_for(matched_conversation)
+            except AssertionError:
+                value=current() or {}
+                print(json.dumps({'synthetic_conversation_failure':{'project':value.get('project'),'active':value.get('active'),
+                    'app':value.get('context',{}).get('app'),
+                    'context_scope':value.get('context',{}).get('context_scope'),
+                    'hints':value.get('context',{}).get('project_hints'),
+                    'collector':api('/api/diagnostics').get('health',{}).get('collector')}}),flush=True)
+                raise
+            assert active['project']!='fixture-7','Sidebar history won over the current conversation'
+            assert 'PRIVATE DRAFT' not in json.dumps(active['context'])
+        finally:
+            conversation.terminate();conversation.wait(timeout=5)
+        metadata_app=launch('CI Metadata','local.dreamstime.metadatafixture','metadata')
+        try:
+            value=wait_for(lambda: context() if context().get('snapshot_scope')=='window_metadata' and current().get('project')=='fixture-4' else None)
+            assert stored(value['snapshot_id'])['scope']=='window_metadata'
+        finally:
+            metadata_app.terminate();metadata_app.wait(timeout=5)
+        call=launch('CI Call','net.whatsapp.WhatsApp','call')
+        try:
+            captured=wait_for(lambda:context() if context().get('activity_kind')=='call' else None)
+            session=captured['call_session']
+            # Put a different app in front. The connected call remains the sole
+            # time owner, with an unchanged opaque session key.
+            subprocess.run(['/usr/bin/open','-a','Finder'],check=True)
+            time.sleep(5)
+            assert context().get('call_session')==session,'Background call was lost'
+            assert current()['active'] is True
+        finally:
+            call.terminate();call.wait(timeout=5)
+        wait_for(lambda:context().get('activity_kind')!='call')
+        with sqlite3.connect(SUPPORT/'activity.sqlite') as db:
+            count,bytes_used=db.execute('SELECT count(*),coalesce(sum(length(payload)+64),0) FROM context_snapshots').fetchone()
+        assert count>0 and bytes_used<=1024*1024
+        (OUT/'context-check.json').write_text(json.dumps({
+            'real_document_header_captured':True,'body_mention_not_assigned':True,'editable_draft_excluded':True,
+            'connected_call_detected':True,'background_call_session_preserved':True,
+            'ended_call_stopped':True,'single_collector_after_reopen':True,
+            'deep_webkit_conversation_candidate':True,'sidebar_history_excluded':True,
+            'specific_window_metadata_captured':True,
+            'compressed_snapshot_bytes':bytes_used,'raw_images_stored':False}))
+    finally:
+        document.terminate();document.wait(timeout=5)
+print('Real Mac document headers, background call controls, call end and single-instance capture verified.')
