@@ -61,7 +61,7 @@ class AutomaticTests(unittest.TestCase):
         self.connect();self.control(context_policy={'schema':'dreamstime/context/v1','enabled':True});self.tick(0)
         self.samples(2,4,app='com.figma.Desktop',app_name='Figma',title='Untitled',
             context_snapshot={'schema':'dreamstime/context/v1','kind':'document','scope':'document_header','labels':['Atlas Studio']})
-        self.assertEqual(self.app.tracker.current['project'],'atlas')
+        self.assertIsNone(self.app.tracker.current['project'])
         self.tick(60)
         self.assertEqual(self.app.tracker.setting('last_heartbeat'),BASE+60)
 
@@ -123,7 +123,7 @@ class AutomaticTests(unittest.TestCase):
         self.assertTrue(next(n for n in self.provider.map['nodes'] if note_payload(n, REVIEW_SCHEMA))['archived'])
 
     def test_new_week_does_not_present_last_weeks_publication_as_current(self):
-        self.connect();self.samples(0,3600,title='Atlas Studio');self.tick(3600)
+        self.connect();self.samples(0,3600,title='Atlas Studio storyboard');self.tick(3600)
         self.assertEqual(self.app.tracker.setting('publication')['published_hours'],1)
         self.tick(7*86400+60)
         current=self.app.tracker.setting('publication')
@@ -162,7 +162,7 @@ class AutomaticTests(unittest.TestCase):
         self.samples(4,6,desktop_context='Birch Client conversation',context_scope='window')
         self.assertIsNone(self.app.tracker.current['project'])
         self.samples(8,10,desktop_context='Birch Client conversation',context_scope='conversation')
-        self.assertEqual(self.app.tracker.current['project'],'birch')
+        self.assertIsNone(self.app.tracker.current['project'])
         self.assertNotIn('conversation', json.dumps(self.app.tracker.current['context'].get('project_hints')))
 
     def test_unknown_note_write_is_retried_once_and_control_not_overwritten(self):
@@ -177,7 +177,7 @@ class AutomaticTests(unittest.TestCase):
         self.assertEqual(json.loads(next(n for n in self.provider.map['nodes'] if n['id']=='control')['fields']['notes'])['focus']['project'],'atlas')
 
     def test_disabled_automation_preserves_hours_without_remote_writes(self):
-        self.connect(); self.samples(0,60,title='Atlas Studio')
+        self.connect(); self.samples(0,60,title='Atlas Studio storyboard')
         self.app.tracker.set_setting('automatic_sync',False); self.tick(300)
         self.assertEqual(self.provider.writes,[])
         self.assertEqual(self.app.tracker.report('2026-10-05')['total_seconds'],60)
@@ -212,10 +212,10 @@ class AutomaticTests(unittest.TestCase):
         self.assertGreater(review['omitted_groups'],0)
 
     def test_archived_project_does_not_block_saving_other_current_work(self):
-        self.connect(); self.samples(0,3600,title='Atlas Studio'); self.tick(3600)
+        self.connect(); self.samples(0,3600,title='Atlas Studio storyboard'); self.tick(3600)
         self.provider.map['nodes'][0]['archived'] = True
         self.provider.map['revision'] += 1
-        self.samples(3602,7260,title='Birch Client'); self.tick(7560)
+        self.samples(3602,7260,title='Birch Client storyboard'); self.tick(7560)
         self.assertEqual(self.hours('birch'),[1])
         self.assertIsNone(self.app.tracker.setting('sync_error'))
 

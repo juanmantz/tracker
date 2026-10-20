@@ -70,7 +70,7 @@ jobs:
           python3 - <<'PY'
           import json
           h=json.load(open('artifacts/native-release/health.json'))
-          assert h['app']=='dreams-time' and h['version']=='0.11.0' and h['capture_host']=='app'
+          assert h['app']=='dreams-time' and h['version']=='0.12.0' and h['capture_host']=='app'
           s=json.load(open('artifacts/native-release/native-sample.json'))
           assert isinstance(s['app'],str) and s['idle']>=0 and isinstance(s['accessibility'],bool)
           import time, urllib.request
@@ -108,7 +108,7 @@ jobs:
         run: python3 tests/mac_app_icon_check.py
       - uses: actions/upload-artifact@v4
         with:
-          name: Dreams-Time-0.11.0-Update
+          name: Dreams-Time-0.12.0-Update
           path: artifacts/native-release/Dreams-Time-Update.pkg
           compression-level: 0
       - name: Split download into manageable artifacts
@@ -157,16 +157,16 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          Path("artifacts/native-release/release-notes.txt").write_text("Dreams Time 0.11.0 adds actual foreground-window screenshots with on-device OCR on macOS 14+. Allow Screen Recording once in the app. No external AI key is needed. Images and full OCR text are immediately discarded; only compact project matches are retained. ChatGPT sidebar history and the bottom composer are excluded before OCR. A unique project match assigns only measured active time. Ambiguous context remains unassigned. Screenshot detection works independently of Accessibility permission.\n\nThe installer preserves project recognition, measured history and sign-in. Completed whole project hours publish automatically, with readback verification and no duplicate weekly records. No historical hours are invented. The app remains ad-hoc signed; macOS controls permission approval.\n")
+          Path("artifacts/native-release/release-notes.txt").write_text("Dreams Time 0.12.0 corrects project attribution. A name in screenshot or conversation text is now a suggestion, never sufficient proof for assigning time. Actual document titles, linked/remembered files, bounded review decisions and your explicit current project remain supported. Broad parent/account-only names are held for review. The Mac automatically rechecks older assignments and replaces its own weekly totals without deleting measured time. No hours are invented or rounded up.\n\nEvery device report now includes a separate current-week assignment audit with project totals and document/app/reason evidence, independent of a crowded uncertain-activity queue. The Projects page has a What counted breakdown. WindowServer document titles can be read when Screen Recording is allowed even if Accessibility is denied. Images and full OCR text remain discarded.\n\nThe installer preserves recorded history, sign-in and learned file associations. The app remains ad-hoc signed; macOS controls permission approval.\n")
           PY
           LATEST_BUILD="$(gh api "repos/$GITHUB_REPOSITORY/git/ref/heads/$GITHUB_REF_NAME" --jq '.object.sha')"
           if [[ "$LATEST_BUILD" != "$GITHUB_SHA" ]]; then
             echo "A newer build superseded this run; no download published."
             exit 0
           fi
-          if gh release view v0.11.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            echo "Version 0.11.0 is already released; keeping its installer immutable."
+          if gh release view v0.12.0 --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Version 0.12.0 is already released; keeping its installer immutable."
             exit 0
           fi
-          gh release create v0.11.0 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dreams Time 0.11.0" --notes-file artifacts/native-release/release-notes.txt
-          gh release upload v0.11.0 --repo "$GITHUB_REPOSITORY" artifacts/native-release/Dreams-Time-Update.pkg artifacts/native-release/Dreams-Time-Installer.pkg artifacts/app-icon/Dreams-Time-Icon.png artifacts/app-icon/Dreams-Time-Icon-128.png
+          gh release create v0.12.0 --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Dreams Time 0.12.0" --notes-file artifacts/native-release/release-notes.txt
+          gh release upload v0.12.0 --repo "$GITHUB_REPOSITORY" artifacts/native-release/Dreams-Time-Update.pkg artifacts/native-release/Dreams-Time-Installer.pkg artifacts/app-icon/Dreams-Time-Icon.png artifacts/app-icon/Dreams-Time-Icon-128.png

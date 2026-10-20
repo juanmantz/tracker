@@ -154,6 +154,13 @@ class Tracker:
         self.session = None
         self.desktop_context = None
         self.context_snapshots = ContextSnapshots(self.db)
+        # Recheck recorded attribution once when upgrading the evidence policy.
+        # Preserve measured seconds, explicit assignments and review decisions.
+        if self.setting('attribution_policy') != 'document-evidence/v2':
+            with self.lock, self.db:
+                self.reclassify()
+                self.set_setting('attribution_policy', 'document-evidence/v2')
+                self.set_setting('auto_dirty', True)
 
     def setting(self, key, default=None):
         with self.lock:
@@ -185,6 +192,7 @@ class Tracker:
             raise ValueError("Expected a Dreams map with a nodes list.")
         candidates = []
         catalog = []
+        containers = {e.get('target') for e in state.get('edges', []) if e.get('relation') == 'Part of'}
         for n in nodes:
             if not isinstance(n, dict):
                 raise ValueError("Invalid node in Dreams map.")
@@ -196,7 +204,7 @@ class Tracker:
                 if not isinstance(links, str):
                     links = ""
                 urls = re.findall(r'https?://[^\s<>"\)]+', links)
-                catalog.append({"id":n["id"],"name":n["name"],"kind":n["kind"],"aliases": n['name'].split(' / ') if ' / ' in n['name'] else [],"identities":sorted(set(identity(u.rstrip('.,;')) for u in urls if identity(u.rstrip('.,;'))))})
+                catalog.append({"id":n["id"],"name":n["name"],"kind":n["kind"],"container":n["id"] in containers,"aliases": n['name'].split(' / ') if ' / ' in n['name'] else [],"identities":sorted(set(identity(u.rstrip('.,;')) for u in urls if identity(u.rstrip('.,;'))))})
         count = 0
         for n in candidates:
             if n.get("kind") in WORK_KINDS and not n.get("archived"):
@@ -266,11 +274,9 @@ class Tracker:
                     return {'project': decision['project'], 'confidence': 'reviewed', 'reason': 'Daily project review', 'candidates': []}
         if result['project'] or result['confidence'] == 'ambiguous':
             return result
-        # Only text extracted from a recognized conversation pane can assign by
-        # a unique project mention. Whole-window/sidebar text remains a suggestion.
-        if context.get('context_scope') in ('conversation', 'document_header', 'conversation_header', 'screenshot') and len(result['candidates']) == 1:
-            reason = 'Project read from the active work window' if context['context_scope'] == 'screenshot' else ('Project in the current conversation' if context['context_scope'] == 'conversation' else 'Project in the active document header')
-            return {'project': result['candidates'][0]['project'], 'confidence': 'high', 'reason': reason, 'candidates': result['candidates']}
+        # Mentions in pixels, conversation bodies or header cards are candidates,
+        # never proof of a project. Assignment requires a document identity/title,
+        # a remembered file, a bounded review or the owner's explicit focus.
         if context.get('activity_kind') == 'call' and context.get('call_session'):
             title = ' '+normalize(context.get('title', ''))+' '
             collaborators = {hint['project'] for hint in self.setting('auto_review_hints', [])
@@ -392,7 +398,7 @@ class Tracker:
                     sample.get('idle', 0) < self.idle_after and isinstance(screen_at, (int, float)) and
                     not isinstance(screen_at, bool) and math.isfinite(screen_at) and
                     0 <= sample['ts'] - screen_at <= 12 and isinstance(sample.get('screen_context'), str)):
-                matches = recognize(context, self.setting('recognition_catalog', []), snippets=[screen_text(sample['screen_context'][:6000])])
+                matches = recognize({'app':app}, self.setting('recognition_catalog', []), snippets=[screen_text(sample['screen_context'][:6000])])
                 if matches['candidates']:
                     context['project_hints'] = [{'project': c['project']} for c in matches['candidates']]
                     context['context_scope'] = 'screenshot'

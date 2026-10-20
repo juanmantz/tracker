@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 
 from . import __version__
 from .connection import Conflict, Rejected
-from .core import context_key, rememberable, is_noise_context
+from .core import context_key, rememberable, is_noise_context, monday
 
 CONTROL_SCHEMA = 'dreamstime/control/v1'
 REVIEW_SCHEMA = 'dreamstime/review/v1'
@@ -98,6 +98,59 @@ class Coordination:
                 self.tracker.reclassify()
                 self.tracker.set_setting('auto_dirty', True)
 
+    def assignment_audit(self, now):
+        """Whole-week totals with bounded evidence, independent of review queue size."""
+        week = monday(now, self.tracker.timezone)
+        report = self.tracker.report(week)
+        projects, sources = {}, {}
+        for segment in report['segments']:
+            project = segment['project']
+            if project is None:
+                continue
+            context = segment['context']
+            key = (project, context_key(context), context.get('app_name', ''), segment['reason'])
+            if key not in sources:
+                title = re.sub(r'(?:https?://|file://|/Users/|/home/)\S+', '[document]', context.get('title', ''))[:96]
+                sources[key] = {'context':key[1], 'app':key[2][:60], 'title':title,
+                                'reason':segment['reason'][:96], 'seconds':0}
+            sources[key]['seconds'] = round(sources[key]['seconds'] + segment['seconds'], 3)
+        omitted_projects, omitted_project_seconds = 0, 0
+        for project, seconds in sorted(report['totals'].items(), key=lambda item:(-int(item[1]//3600), -item[1], item[0])):
+            if project == 'unassigned':
+                continue
+            hours = int(seconds // 3600)
+            row = {'project':project, 'seconds':seconds, 'publishable_hours':hours,
+                'retained_seconds':round(seconds-hours*3600, 3), 'sources':[],
+                'omitted_sources':0, 'omitted_seconds':0}
+            projects[project] = row
+            if len(json.dumps(list(projects.values()), separators=(',', ':'))) > 4500:
+                del projects[project]
+                omitted_projects += 1
+                omitted_project_seconds += seconds
+        queues = {}
+        for project, row in projects.items():
+            queues[project] = sorted([v for k,v in sources.items() if k[0] == project], key=lambda v:-v['seconds'])
+            row['source_count'] = len(queues[project])
+        audit = {'schema':'dreamstime/assignment-audit/v1', 'week':week,
+                 'seconds':round(sum(v for k,v in report['totals'].items() if k!='unassigned'), 3),
+                 'unassigned_seconds':report['totals'].get('unassigned', 0),
+                 'omitted_projects':omitted_projects,'omitted_project_seconds':round(omitted_project_seconds,3),
+                 'projects':list(projects.values())}
+        # Preserve the assigned aggregate and prioritize complete-hour projects.
+        # Evidence is fairly distributed; all omissions are explicitly counted.
+        while any(queues.values()):
+            for project, queue in queues.items():
+                if not queue:
+                    continue
+                source = queue.pop(0)
+                row = projects[project]
+                row['sources'].append(source)
+                if len(json.dumps(audit, separators=(',', ':'))) > 6500:
+                    row['sources'].pop()
+                    row['omitted_sources'] += 1
+                    row['omitted_seconds'] = round(row['omitted_seconds'] + source['seconds'], 3)
+        return audit
+
     def review_payload(self, now):
         rows, cards = {}, {}
         with self.tracker.lock:
@@ -151,11 +204,12 @@ class Coordination:
             'last_save': self.tracker.setting('last_sync'), 'publication': self.tracker.setting('publication'), 'sync_error': self.tracker.setting('sync_error'),
             'local_review_at': self.tracker.setting('local_review_at'), 'context_storage': storage,
             'context_capture_enabled': bool(self.tracker.setting('desktop_context_enabled', False)),
+            'assignment_audit': self.assignment_audit(now),
             'activities': [], 'snapshots': {}, 'omitted_groups': len(ordered), 'omitted_seconds': 0,
             'summarized_groups': summarized_groups,
             'unattributed_summary': sorted(summaries.values(), key=lambda r:(-r['seconds'],r['app'],r['day']))[:24],
             'summary_omitted_groups': max(0, len(summaries)-24)}
-        while payload['unattributed_summary'] and len(json.dumps(payload, separators=(',', ':'))) > 8500:
+        while payload['unattributed_summary'] and len(json.dumps(payload, separators=(',', ':'))) > 10500:
             payload['unattributed_summary'].pop()
         payload['summarized_groups'] = sum(r['groups'] for r in payload['unattributed_summary'])
         payload['summary_omitted_groups'] = summarized_groups - payload['summarized_groups']

@@ -42,6 +42,11 @@ try{
   await page.getByRole('button',{name:'Projects',exact:true}).click();await page.locator('#project-name').fill('Dreams work');await page.locator('#project-form button').click();
   await page.locator('.assignment select').first().selectOption({label:'Dreams work'});await page.getByRole('button',{name:'Remember document',exact:true}).click();
   await page.getByText('Project saved.',{exact:false}).waitFor();assert.equal(await page.locator('#weekly-total').innerText(),'1m 00s recorded');checks.push('Projects are separate and attribution uses real stored activity');
+  await page.locator('#project-totals details summary').click();
+  assert.match(await page.locator('#project-totals details').innerText(),/Saved window title/);
+  await page.evaluate(()=>refresh());assert.equal(await page.locator('#project-totals details').getAttribute('open'),'');
+  await page.screenshot({path:'artifacts/project-evidence.png',fullPage:true});
+  checks.push('Project totals expose document/app/reason evidence and preserve expanded breakdown through refresh');
   await page.locator('#review').evaluate(e=>e.closest('details').open=true);await page.locator('#review').click();await page.getByText('Hours reviewed. Ready to prepare an update.',{exact:true}).waitFor();
   await page.locator('#export').click();await page.getByText('Import your current Dreams map',{exact:false}).waitFor();checks.push('Reviewed export preserves missing-connection feedback');
   override={state:'recording',today_seconds:66};await page.locator('#project-name').focus();await page.waitForFunction(()=>document.querySelector('#today-timer').textContent==='00:01:06');checks.push('Polling continues while a form has focus');override=null;

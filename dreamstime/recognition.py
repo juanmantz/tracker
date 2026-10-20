@@ -47,7 +47,15 @@ def recognize(context, catalog, explicit=None, snippets=None):
     # An exact narrower name (Atlas identity) wins over its broad prefix (Atlas).
     matches = [m for m in matches if not any(m['project'] != other['project'] and m['alias'] != other['alias'] and (' '+m['alias']+' ') in (' '+other['alias']+' ') for other in matches)]
     if len(matches) == 1:
-        return {'project':matches[0]['project'],'confidence':'high','reason':'Project name in document','candidates':[]}
+        match = matches[0]
+        asset = next(p for p in catalog if p['id'] == match['project'])
+        # A broad parent/account name alone is not a specific work document.
+        # Native chat window titles also need more than a bare project name.
+        bare = normalize(context.get('title', '')) in {match['alias'], match['alias']+' '+normalize(context.get('app_name', ''))}
+        chat = context.get('app') in {'com.openai.chat','com.openai.chatgpt','com.openai.codex'}
+        if asset.get('container') or (bare and chat):
+            return {'project':None,'confidence':'suggested','reason':'A broad parent needs a linked or reviewed document' if asset.get('container') else 'A project/account name alone does not identify the work','candidates':matches}
+        return {'project':match['project'],'confidence':'high','reason':'Project name in document','candidates':[]}
     if len(matches) > 1:
         return {'project':None,'confidence':'ambiguous','reason':'More than one project mentioned','candidates':matches}
     # Accessibility text can contain sidebar content, so never silently assign from it.

@@ -74,6 +74,7 @@ class NativeHostTests(unittest.TestCase):
             context_enabled=True,screen_capture_permission=True,screen_capture_state='readable',
             screen_context_at=time.time(),screen_context='Hey, transform'))
         snap=self.app.snapshot()
-        self.assertEqual(snap['current']['project'],'hey')
+        self.assertIsNone(snap['current']['project'])
+        self.assertEqual(snap['recommendation']['candidates'][0]['project'],'hey')
         self.assertEqual(snap['recording']['project_detection'],'screen_ocr')
         self.assertNotEqual(snap['recording']['state'],'permission_required')

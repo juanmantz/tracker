@@ -115,9 +115,26 @@ function renderProjects(data,names){
   }
   $('#review-status').textContent=data.report.reviewed?'Hours reviewed. Ready to prepare an update.':data.report.total_seconds?`${secondsLabel(data.report.totals.unassigned||0)} still needs a project. Check the assignments above.`:'Record some activity first.';
   $('#review').disabled=!data.report.total_seconds||data.report.reviewed;$('#export').disabled=!data.report.reviewed;
+  const expanded=new Set([...$('#project-totals').querySelectorAll('details[open]')].map(e=>e.dataset.project));
   $('#project-totals').replaceChildren();
   Object.entries(data.report.totals).forEach(([id,seconds])=>{
     const row=make('div',undefined,'recent-row');row.append(make('span',id==='unassigned'?'Needs a project':names[id]||id),make('time',secondsLabel(seconds)));$('#project-totals').append(row);
+    if(id!=='unassigned'){
+      const details=make('details'),summary=make('summary',`What counted for ${names[id]||id}`),sources=new Map();
+      details.dataset.project=id;details.open=expanded.has(id);details.append(summary);
+      data.report.segments.filter(s=>s.project===id).forEach(s=>{
+        const c=s.context,key=JSON.stringify([c.app,c.identity,c.title,s.reason]);
+        if(!sources.has(key))sources.set(key,{app:c.app_name,title:c.title,reason:s.reason,seconds:0});
+        sources.get(key).seconds+=s.seconds;
+      });
+      [...sources.values()].sort((a,b)=>b.seconds-a.seconds).forEach(source=>{
+        const item=make('div',undefined,'recent-row'),label=make('div');
+        label.append(make('span',source.title||'No document title'),make('p',`${source.app} · ${source.reason}`,'reason'));
+        item.append(label,make('time',secondsLabel(source.seconds)));details.append(item);
+      });
+      details.append(make('p',`${Math.floor(seconds/3600)} completed hours; ${secondsLabel(seconds%3600)} retained on this Mac.`,'reason'));
+      $('#project-totals').append(details);
+    }
   });
   const d=data.dreams||{},assigned=data.report.total_seconds-(data.report.totals.unassigned||0);
   $('#sync').disabled=!d.connected||(!assigned&&!d.weeks?.includes(data.report.week)&&!d.pending)||busy;$('#connect-projects').hidden=!!d.connected;

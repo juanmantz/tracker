@@ -297,6 +297,19 @@ func startNativeActivitySensor(requestPermission: Bool = false,
                 }
             }
         }
+        // With Screen Recording, WindowServer exposes the actual front window
+        // title even when AX is denied. Do not scrape a name from screen text.
+        if title.isEmpty && !locked && contextEnabled() && CGPreflightScreenCaptureAccess() &&
+            !browsers.contains(bundle) && !excluded.contains(bundle), let pid = foreground?.processIdentifier {
+            let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+            if let window = windows.first(where: {
+                ($0[kCGWindowOwnerPID as String] as? Int) == Int(pid) &&
+                ($0[kCGWindowLayer as String] as? Int) == 0 &&
+                ($0[kCGWindowAlpha as String] as? Double ?? 0) > 0
+            }) {
+                title = String((window[kCGWindowName as String] as? String ?? "").prefix(500))
+            }
+        }
         var snapshot: [String: Any]?
         var callID: String?
         if !locked && !excluded.contains(frontBundle) && contextEnabled() {

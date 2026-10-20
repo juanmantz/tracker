@@ -15,9 +15,9 @@ class ScreenEvidenceTests(unittest.TestCase):
     def sample(self,offset,text='Atlas Studio confidential conversation text',**extra):
         return self.t.ingest({'ts':BASE+offset,'app':'com.openai.chatgpt','app_name':'ChatGPT','title':'ChatGPT',
             'idle':0,'screen_capture_permission':True,'screen_context_at':BASE+offset,'screen_context':text,**extra})
-    def test_screen_match_assigns_measured_seconds_without_retaining_image_or_transcript(self):
+    def test_screen_match_preserves_unassigned_seconds_without_retaining_image_or_transcript(self):
         self.sample(0);self.sample(2)
-        self.assertEqual(self.t.report('2026-10-05')['totals'],{'atlas':2})
+        self.assertEqual(self.t.report('2026-10-05')['totals'],{'unassigned':2})
         self.assertFalse(rememberable(self.t.current['context']))
         self.assertIsNone(self.t.desktop_context)
         payload=Coordination(self.t,None,'mac').review_payload(BASE+2)
@@ -43,14 +43,16 @@ class ScreenEvidenceTests(unittest.TestCase):
     def test_new_screen_evidence_changes_the_project_without_unbounded_learning(self):
         self.sample(0);self.sample(2)
         self.sample(4,'Birch Client');self.sample(6,'Birch Client')
-        self.assertEqual(self.t.current['project'],'birch')
+        self.assertIsNone(self.t.current['project'])
+        self.assertEqual(self.t.recommendation(self.t.current['context'])['candidates'][0]['project'],'birch')
         self.sample(8,'Unrelated topic');self.assertIsNone(self.t.current['project'])
 
     def test_real_vision_output_with_cyrillic_digit_lookalike_matches_only_the_clear_project(self):
         self.t.import_projects({'revision':1,'nodes':[{'id':'fixture-'+str(i),'kind':'project',
             'name':'Fixture project '+str(i),'fields':{}} for i in range(11)],'edges':[]})
         self.sample(0,'7 Fixture project \u0417\nStoryboard work')
-        self.assertEqual(self.t.current['project'],'fixture-3')
+        self.assertIsNone(self.t.current['project'])
+        self.assertEqual(self.t.recommendation(self.t.current['context'])['candidates'][0]['project'],'fixture-3')
         self.sample(2,'Fixture project \u0417 and Fixture project 7')
         self.assertIsNone(self.t.current['project'])
         self.sample(4,'Unrelated work',title='Fixture project \u0417')
@@ -64,10 +66,10 @@ class ScreenTransferTests(unittest.TestCase):
     connect=integration.IntegrationTests.connect
     hours=integration.IntegrationTests.hours
 
-    def test_screenshot_attribution_publishes_exactly_one_hour_with_readback_without_waiting(self):
+    def test_document_title_with_screen_hints_publishes_one_hour_with_readback(self):
         self.connect();self.app.tracker.set_setting('desktop_context_enabled',True)
         for offset in range(0,3601,10):
-            self.app.tracker.ingest({'ts':BASE+offset,'idle':0,'app':'com.openai.chatgpt','app_name':'ChatGPT','title':'ChatGPT',
+            self.app.tracker.ingest({'ts':BASE+offset,'idle':0,'app':'com.openai.chatgpt','app_name':'ChatGPT','title':'Atlas Studio storyboard',
                 'ax_trusted':False,'accessibility':False,'screen_capture_permission':True,
                 'screen_context_at':BASE+offset,'screen_context':'Atlas Studio current design discussion'})
             if offset==3590:

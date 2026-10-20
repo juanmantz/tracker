@@ -30,7 +30,7 @@ fail() {
 }
 trap 'fail "Setup did not finish. Reopen Dreams Time to retry. The setup log is in Library/Application Support/Dreams Time/launcher.log."' ERR
 
-APP_VERSION="0.11.0"
+APP_VERSION="0.12.0"
 # Installed launches always use the app-owned collector, including a reopen
 # request delivered to an older GUI executable during an upgrade.
 if [[ "${DREAMSTIME_INSTALLED:-0}" == 1 ]]; then export DREAMSTIME_NATIVE_HOST=1; fi

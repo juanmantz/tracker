@@ -146,7 +146,7 @@ db.execute('INSERT INTO access('+','.join(keys)+') VALUES('+','.join('?' for _ i
         try:
             def matched_conversation():
                 value=current() or {}
-                return value if value.get('project')=='fixture-3' and value.get('context',{}).get('context_scope') in ('conversation','conversation_header') else None
+                return value if value.get('project') is None and value.get('context',{}).get('context_scope') in ('conversation','conversation_header') and value.get('context',{}).get('project_hints') == [{'project':'fixture-3'}] else None
             try:
                 active=wait_for(matched_conversation)
             except AssertionError:
@@ -184,7 +184,7 @@ db.execute('INSERT INTO access('+','.join(keys)+') VALUES('+','.join('?' for _ i
             count,bytes_used=db.execute('SELECT count(*),coalesce(sum(length(payload)+64),0) FROM context_snapshots').fetchone()
         assert count>0 and bytes_used<=1024*1024
         (OUT/'context-check.json').write_text(json.dumps({
-            'real_document_header_captured':True,'editable_draft_excluded':True,
+            'real_document_header_captured':True,'body_mention_not_assigned':True,'editable_draft_excluded':True,
             'connected_call_detected':True,'background_call_session_preserved':True,
             'ended_call_stopped':True,'single_collector_after_reopen':True,
             'deep_webkit_conversation_assigned':True,'sidebar_history_excluded':True,

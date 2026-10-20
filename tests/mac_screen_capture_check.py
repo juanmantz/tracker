@@ -96,6 +96,7 @@ let timer=Timer.scheduledTimer(withTimeInterval:1,repeats:true){_ in
     window.makeKeyAndOrderFront(nil);app.activate(ignoringOtherApps:true)
     guard AXIsProcessTrusted() && CGPreflightPostEventAccess() else { fputs("CI pixel fixture lacks mouse-event permission.\\n",stderr);exit(2) }
     let source=CGEventSource(stateID:.hidSystemState)
+    if CommandLine.arguments.count>1, let label=try? String(contentsOfFile:CommandLine.arguments[1]+".title",encoding:.utf8) { window.title=label }
     shifted.toggle()
     CGEvent(mouseEventSource:source,mouseType:.mouseMoved,mouseCursorPosition:CGPoint(x:shifted ? 703 : 697,y:350),mouseButton:.left)?.post(tap:.cghidEventTap)
 }
@@ -136,6 +137,12 @@ app.run()
         subprocess.run(['/usr/bin/open','-n','-g','-W',str(probe),'--args',pid_file.read_text(),str(output),str(picture)],check=True,timeout=45)
         if output.exists():print('SYNTHETIC WINDOW OCR DIAGNOSTIC: '+output.read_text(),flush=True)
     try:
+        def candidates_only():
+            s=api('/api/snapshot');value=s.get('current')or{};c=value.get('context',{})
+            return s if value.get('project') is None and c.get('context_scope')=='screenshot' and c.get('project_hints')==[{'project':'fixture-3'}] else None
+        negative=wait_for(candidates_only)
+        assert api('/api/snapshot')['report']['totals'].get('fixture-3',0)==initial
+        Path(str(pid_file)+'.title').write_text('Fixture project 3 Storyboard')
         def matched():
             assert process.poll() is None,'The CI mouse-event fixture exited before screenshot attribution'
             s=api('/api/snapshot');c=(s.get('current')or{}).get('context',{})
@@ -154,10 +161,10 @@ app.run()
             card=json.loads(zlib.decompress(db.execute('SELECT payload FROM context_snapshots WHERE id=?',(c['snapshot_id'],)).fetchone()[0]))
         assert card['source']=='screen_ocr' and card['labels']==['Fixture project 3'],card
         assert 'PRIVATE' not in json.dumps(c) and 'Fixture project 7' not in json.dumps(card)
-        Path('artifacts/native-release/screen-capture-check.json').write_text(json.dumps({'real_window_pixels_ocr':True,'works_without_accessibility':True,'screen_permission_required':True,'setup_action_opened_settings':True,'collector_refreshed_automatically_after_setup':True,'sidebar_and_composer_excluded':True,'project':'fixture-3','measured_seconds_added_at_least':2,'images_stored':False,'full_ocr_text_retained':False,'screen_capture_count':health['screen_capture_count']}))
+        Path('artifacts/native-release/screen-capture-check.json').write_text(json.dumps({'real_window_pixels_ocr':True,'works_without_accessibility':True,'screen_permission_required':True,'setup_action_opened_settings':True,'collector_refreshed_automatically_after_setup':True,'sidebar_and_composer_excluded':True,'project':'fixture-3','body_mention_not_assigned':True,'document_title_evidence':True,'measured_seconds_added_at_least':2,'images_stored':False,'full_ocr_text_retained':False,'screen_capture_count':health['screen_capture_count']}))
     finally:
         if pid_file.exists():
             try:os.kill(int(pid_file.read_text()),signal.SIGTERM)
             except ProcessLookupError:pass
         process.wait(timeout=5)
-print('Installed app OCRed real window pixels, excluded sidebar/draft and attributed actual seconds without Accessibility.')
+print('Installed app OCRed real window pixels, excluded sidebar/draft and rejected body-only mentions and attributed document-title seconds without Accessibility.')

@@ -15,7 +15,7 @@ try{
   await page.locator('#connect-projects').click();
   await page.waitForURL(`http://127.0.0.1:${port}/#projects`);await page.getByText('Assigned to Atlas Studio · File linked in Dreams',{exact:true}).waitFor();
   checks.push('Connect button completes real HTTP registration, redirect, PKCE callback, token exchange and MCP project load against an isolated provider');
-  assert.equal(await page.locator('#project-totals').innerText(),'Atlas Studio\n1h 00m\nNeeds a project\n1h 00m');
+  assert.equal(await page.locator('#project-totals').innerText(),'Atlas Studio\n1h 00m\nWhat counted for Atlas Studio\nNeeds a project\n1h 00m');
   const suggested=page.locator('.activity').filter({has:page.getByRole('heading',{name:'Strategy',exact:true})});
   await suggested.getByText('Suggested: Birch Client',{exact:false}).waitFor();assert.equal(await suggested.locator('select').inputValue(),'birch');
   checks.push('File rename still matches its linked identity; submitted conversation content suggests a project without assigning it');
