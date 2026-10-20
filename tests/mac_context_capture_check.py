@@ -187,7 +187,7 @@ db.execute('INSERT INTO access('+','.join(keys)+') VALUES('+','.join('?' for _ i
             'real_document_header_captured':True,'body_mention_not_assigned':True,'editable_draft_excluded':True,
             'connected_call_detected':True,'background_call_session_preserved':True,
             'ended_call_stopped':True,'single_collector_after_reopen':True,
-            'deep_webkit_conversation_assigned':True,'sidebar_history_excluded':True,
+            'deep_webkit_conversation_candidate':True,'sidebar_history_excluded':True,
             'specific_window_metadata_captured':True,
             'compressed_snapshot_bytes':bytes_used,'raw_images_stored':False}))
     finally:
