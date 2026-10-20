@@ -36,6 +36,7 @@ def service_pid():
     return int((SUPPORT / 'tracker.pid').read_text())
 
 
+expected_version = api('/health')['version']
 before = api('/api/diagnostics')['recording']['sample_count']
 backend = service_pid()
 sensor = api('/api/diagnostics')['health']['collector']['collector_pid']
@@ -45,7 +46,7 @@ wait_for(lambda: api('/api/diagnostics')['health'].get('collector', {}).get('col
          and api('/api/diagnostics')['recording']['sample_count'] > before + 2, 100)
 subprocess.run(['/bin/launchctl', 'print', 'gui/' + str(os.getuid()) + '/local.dreamstime.start'], check=True, stdout=subprocess.DEVNULL)
 os.kill(backend, signal.SIGKILL)
-wait_for(lambda: service_pid() != backend and api('/health')['version'] == '0.11.0', 100)
+wait_for(lambda: service_pid() != backend and api('/health')['version'] == expected_version, 100)
 wait_for(lambda: api('/api/diagnostics')['recording']['sample_count'] >= 2, 20)
 api('/api/quit', {})
 time.sleep(2)
